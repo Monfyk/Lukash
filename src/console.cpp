@@ -71,7 +71,7 @@ static void RunGame(const std::string& exe, ULONG res, bool cleanRam) {
     g_stop = false;
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
     RunGameMode(exe, res, g_stop, nullptr, [cleanRam](DWORD) {
-        if (cleanRam) CleanMemory(DefaultExclude());
+        if (cleanRam) CleanMemory(DefaultExclude(), false);
     });
     SetConsoleCtrlHandler(CtrlHandler, FALSE);
 }

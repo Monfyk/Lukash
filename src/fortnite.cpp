@@ -136,6 +136,19 @@ bool WriteSettings(int fpsLimit, bool vsync, bool performanceMode, bool fullscre
     std::string bak = f + ".kairo-backup";
     if (!lb::FileExists(bak)) CopyFileA(f.c_str(), bak.c_str(), TRUE);
 
+    // UTF-8 BOM на початку заважає Windows знайти першу секцію — прибираємо його (вміст той самий)
+    {
+        std::string data = ReadFile(f);
+        if (data.size() >= 3 && (unsigned char)data[0] == 0xEF && (unsigned char)data[1] == 0xBB &&
+            (unsigned char)data[2] == 0xBF) {
+            SetFileAttributesA(f.c_str(), FILE_ATTRIBUTE_NORMAL);
+            if (FILE* out = fopen(f.c_str(), "wb")) {
+                fwrite(data.data() + 3, 1, data.size() - 3, out);
+                fclose(out);
+            }
+        }
+    }
+
     // Файл може бути "лише для читання" — знімаємо атрибут на час запису
     DWORD attr = GetFileAttributesA(f.c_str());
     if (attr & FILE_ATTRIBUTE_READONLY) SetFileAttributesA(f.c_str(), attr & ~FILE_ATTRIBUTE_READONLY);

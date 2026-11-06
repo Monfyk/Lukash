@@ -478,8 +478,8 @@ static void InfoBox(const char* text, ImVec4 color = kAccent2) {
 // ---------------------------------------------------------------------------
 
 static void RefreshTweaks(App& a, bool force = false) {
-    if (a.tweakTask.running) return;
-    if (a.lowPower && !a.tweakState.empty() && !force) return;  // під час гри не опитуємо реєстр і служби
+    if (a.tweakTask.running && a.tweakState.size() == tw::All().size()) return;
+    if (a.lowPower && a.tweakState.size() == tw::All().size() && !force) return;  // під час гри не опитуємо реєстр і служби
     if (!force && ImGui::GetTime() - a.tweakStateTime < 2.0) return;
     const auto& all = tw::All();
     a.tweakState.resize(all.size());
@@ -500,11 +500,11 @@ static void RunTweakJob(App& a, const std::string& pending, std::function<void()
     a.pendingTweak.clear();
 }
 
-static void StartRamClean(App& a) {
+static void StartRamClean(App& a, bool purgeStandby = true) {
     std::vector<std::string> ex = a.ramExclude;
     ex.push_back("KairoBoost.exe");
-    a.ramTask.Start([&a, ex] {
-        lb::CleanResult r = lb::CleanMemory(ex);
+    a.ramTask.Start([&a, ex, purgeStandby] {
+        lb::CleanResult r = lb::CleanMemory(ex, purgeStandby);
         a.ramLastFreed = r.freedBytes;
     });
     SYSTEMTIME t;
@@ -519,8 +519,8 @@ static void StartRamClean(App& a) {
 static void RamScheduler(App& a) {
     if (a.ramRequest && !a.ramTask.running) {
         a.ramRequest = false;
-        lb::Log("Гру запущено — автоматична очистка ОЗУ");
-        StartRamClean(a);
+        lb::Log("Гру запущено — звільняю пам'ять фонових програм");
+        StartRamClean(a, false);  // кеш файлів гри не чіпаємо, щоб не сповільнити завантаження
         return;
     }
     if (!a.ramAuto || a.ramTask.running || a.ramMode == 0) return;
@@ -1369,6 +1369,9 @@ static void PageRamUi(App& a) {
     ImGui::TextUnformatted("Запускати, коли:");
     bool changed = false;
     changed |= ImGui::RadioButton("запускається гра (режим гри / БУСТ)", &a.ramMode, 0);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Звільняє пам'ять фонових програм. Кеш файлів гри не чіпається,\n"
+                          "щоб не сповільнити завантаження матчу.");
     changed |= ImGui::RadioButton("вільної пам'яті менше ніж", &a.ramMode, 1);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(S(110));

@@ -104,7 +104,8 @@ struct CleanResult {
     bool standbyPurged = false;
 };
 // Скидає робочі набори процесів (крім exclude) і очищає standby-список.
-CleanResult CleanMemory(const std::vector<std::string>& exclude);
+// purgeStandby=false — лише робочі набори (при старті гри: кеш файлів гри лишається, завантаження не сповільнюється)
+CleanResult CleanMemory(const std::vector<std::string>& exclude, bool purgeStandby = true);
 
 // ---- Тест мережі --------------------------------------------------------------
 struct PingResult {

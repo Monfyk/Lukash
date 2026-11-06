@@ -605,6 +605,11 @@ bool QosApply(const std::string& exe) {
 bool QosRemove(const std::string& exe) {
     std::string path = std::string(kQosRoot) + "\\" + kQosPrefix + exe;
     bool ok = RegDeleteKeyA(HKEY_LOCAL_MACHINE, path.c_str()) == ERROR_SUCCESS;
+    // Якщо інших наших QoS-політик не лишилось — повертаємо і "Do not use NLA"
+    bool any = false;
+    for (auto& name : RegSubKeys(HKEY_LOCAL_MACHINE, kQosRoot))
+        if (name.rfind(kQosPrefix, 0) == 0) any = true;
+    if (!any) RegRestore(Sz(HKEY_LOCAL_MACHINE, kTcpQos, "Do not use NLA", ""));
     RunHidden("gpupdate.exe /target:computer /force");
     return ok;
 }
@@ -645,7 +650,7 @@ MemInfo GetMemInfo() {
     return m;
 }
 
-CleanResult CleanMemory(const std::vector<std::string>& exclude) {
+CleanResult CleanMemory(const std::vector<std::string>& exclude, bool purgeStandby) {
     CleanResult r;
     MemInfo before = GetMemInfo();
     EnablePrivilege("SeProfileSingleProcessPrivilege");
@@ -675,7 +680,7 @@ CleanResult CleanMemory(const std::vector<std::string>& exclude) {
     // Очищення standby-списку (кеш файлів, який іноді "не віддається" іграм)
     typedef LONG(NTAPI * NtSetSystemInformation_t)(int, PVOID, ULONG);
     auto fn = (NtSetSystemInformation_t)(void*)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtSetSystemInformation");
-    if (fn) {
+    if (fn && purgeStandby) {
         const int SystemMemoryListInformation = 80;
         int cmd = 4;  // MemoryPurgeStandbyList
         r.standbyPurged = fn(SystemMemoryListInformation, &cmd, sizeof(cmd)) == 0;
@@ -683,7 +688,7 @@ CleanResult CleanMemory(const std::vector<std::string>& exclude) {
     MemInfo after = GetMemInfo();
     r.freedBytes = (LONGLONG)after.avail - (LONGLONG)before.avail;
     Log("[OK] Очистка ОЗУ: звільнено %.0f МБ (процесів: %d, standby: %s)", r.freedBytes / 1048576.0, r.trimmed,
-        r.standbyPurged ? "очищено" : "без змін");
+        r.standbyPurged ? "очищено" : (purgeStandby ? "без змін" : "не чіпали"));
     return r;
 }
 
