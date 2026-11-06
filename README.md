@@ -3,6 +3,7 @@
 Timer Resolution, твіки Windows, налаштування Fortnite, очистка ОЗУ і тест пінгу — в одній програмі для Windows 10/11. Тільки те, що *реально працює* на рівні системи, і кожну зміну можна відкотити.
 
 ![Головна](docs/home.png)
+![Порадник](docs/advisor.png)
 ![Твіки](docs/tweaks.png)
 ![Fortnite](docs/fortnite.png)
 ![Очистка ОЗУ](docs/ram.png)

@@ -209,7 +209,10 @@ std::string SystemInfo::Summary() const {
     snprintf(b, sizeof(b), "Системний диск: %s, вільно %llu ГБ\n", diskKnown ? (systemSsd ? "SSD" : "HDD") : "?",
              freeDiskGb);
     r += b;
-    snprintf(b, sizeof(b), "Монітор: %u Гц (максимум %u Гц)\n", refreshCur, refreshMax);
+    if (refreshCur)
+        snprintf(b, sizeof(b), "Монітор: %u Гц (максимум %u Гц)\n", refreshCur, refreshMax);
+    else
+        snprintf(b, sizeof(b), "Монітор: частоту не вдалося визначити\n");
     r += b;
     snprintf(b, sizeof(b), "Мережа: %s · %s · Windows build %u\n", onWifi ? "Wi-Fi" : "кабель",
              hasBattery ? (onBattery ? "ноутбук від батареї" : "ноутбук від мережі") : "стаціонарний ПК", build);
