@@ -225,6 +225,10 @@ struct App {
     std::string fnExe;
     bool fnRunning = false;
     bool onWifi = false;
+
+    // Повтор клавіш
+    int kbDelay = 150, kbInterval = 10;
+    char kbTest[256] = "";
     fn::Settings fnSettings;
     int fnFpsIdx = 0;
     bool fnVsync = false, fnPerf = false, fnFullscreen = false, fnLowGfx = false;
@@ -313,6 +317,8 @@ static void SaveSettings(const App& a) {
     put("RamExclude", ex);
     put("Targets", a.targets);
     put("MinimizeOnGame", a.minimizeOnGame ? "1" : "0");
+    put("KeyDelay", std::to_string(a.kbDelay));
+    put("KeyInterval", std::to_string(a.kbInterval));
     put("CloseToTray", a.closeToTray ? "1" : "0");
     put("TrayHintShown", a.trayHintShown ? "1" : "0");
 }
@@ -339,6 +345,8 @@ static void LoadSettings(App& a) {
     }
     if ((v = get("Targets")) != "\x01" && !v.empty()) snprintf(a.targets, sizeof(a.targets), "%s", v.c_str());
     if ((v = get("MinimizeOnGame")) != "\x01") a.minimizeOnGame = v == "1";
+    if ((v = get("KeyDelay")) != "\x01") a.kbDelay = std::clamp(atoi(v.c_str()), 100, 1000);
+    if ((v = get("KeyInterval")) != "\x01") a.kbInterval = std::clamp(atoi(v.c_str()), 5, 500);
     if ((v = get("CloseToTray")) != "\x01") a.closeToTray = v == "1";
     if ((v = get("TrayHintShown")) != "\x01") a.trayHintShown = v == "1";
 }
@@ -658,6 +666,7 @@ static void TweakCard(App& a, size_t idx, float width) {
     ImGui::BeginDisabled(busy || unavailable);
     if (Toggle("##t", st.on, pending)) {
         bool turnOn = !st.on;
+        if (std::string(t.id) == "keyboard") tw::SetKeyRepeat(a.kbDelay, a.kbInterval);
         size_t i = idx;
         RunTweakJob(a, t.id, [i, turnOn] {
             const tw::Tweak& tk = tw::All()[i];
@@ -1087,6 +1096,82 @@ static void PageFortniteUi(App& a) {
     EndCard();
 }
 
+// Налаштування повтору клавіш (FilterKeys) — повзунки
+static void KeyRepeatPanel(App& a) {
+    const tw::Tweak* kt = tw::Find("keyboard");
+    if (!kt) return;
+    size_t idx = (size_t)(kt - &tw::All()[0]);
+    bool on = idx < a.tweakState.size() && a.tweakState[idx].on;
+    bool busy = a.tweakTask.running;
+
+    BeginCard("kbpanel", ImVec2(0, 0));
+    SectionTitle("Повтор клавіш");
+    ImGui::SameLine();
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + S(4));
+    if (on) {
+        int d, i;
+        if (tw::ReadSystemKeyRepeat(d, i))
+            ImGui::TextColored(kGood, "  зараз: %d мс / %d мс", d, i);
+    } else {
+        ImGui::TextColored(kMuted, "  зараз: стандартні налаштування Windows");
+    }
+    HelpText("Як FilterKeysSetter: «Фільтрація введення» Windows з власними інтервалами (натискання не "
+             "фільтруються). Затисни клавішу в полі нижче, щоб перевірити.");
+    ImGui::Spacing();
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Затримка перед повтором");
+    ImGui::SameLine(S(260));
+    ImGui::SetNextItemWidth(S(300));
+    ImGui::SliderInt("##kbdelay", &a.kbDelay, 100, 1000, "%d мс");
+    if (a.kbDelay < 150) {
+        ImGui::SameLine();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(kWarn, "може дублювати символи");
+    }
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Інтервал повтору");
+    ImGui::SameLine(S(260));
+    ImGui::SetNextItemWidth(S(300));
+    char fmt[64];
+    snprintf(fmt, sizeof(fmt), "%%d мс  (~%d разів/с)", 1000 / std::max(1, a.kbInterval));
+    ImGui::SliderInt("##kbint", &a.kbInterval, 5, 100, fmt);
+    if (a.kbInterval < 16)
+        HelpText("Інтервал менше 16 мс може обмежуватися системним таймером Windows (крок 15.6 мс) — найточніше "
+                 "працює, поки KairoBoost тримає Timer Resolution (режим гри або сторінка Timer Resolution).");
+    ImGui::TextColored(kMuted, "Пресети:");
+    struct Preset { const char* name; int d, i; };
+    static const Preset presets[] = {{"Швидко", 250, 20}, {"Дуже швидко", 200, 15}, {"Максимум", 150, 10}, {"Екстрим", 100, 5}};
+    for (auto& p : presets) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton(p.name)) {
+            a.kbDelay = p.d;
+            a.kbInterval = p.i;
+        }
+    }
+    ImGui::Spacing();
+    ImGui::BeginDisabled(busy);
+    if (AccentButton(on ? "Застосувати значення" : "Увімкнути з цими значеннями", ImVec2(S(280), S(38)))) {
+        tw::SetKeyRepeat(a.kbDelay, a.kbInterval);
+        SaveSettings(a);
+        RunTweakJob(a, "keyboard", [idx] { tw::Apply(tw::All()[idx]); });
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!on);
+    if (ImGui::Button("Стандарт Windows", ImVec2(S(200), S(38))))
+        RunTweakJob(a, "keyboard", [idx] { tw::Revert(tw::All()[idx]); });
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    ImGui::Spacing();
+    ImGui::InputTextMultiline("##kbtest", a.kbTest, sizeof(a.kbTest), ImVec2(-1, S(56)));
+    if (!a.kbTest[0] && !ImGui::IsItemActive()) {
+        ImVec2 r = ImGui::GetItemRectMin();
+        ImGui::GetWindowDrawList()->AddText(ImVec2(r.x + S(10), r.y + S(8)), ImGui::GetColorU32(kMuted),
+                                            "Тестове поле: клацни і затисни будь-яку клавішу");
+    }
+    EndCard();
+}
+
 static void PageTweaksUi(App& a) {
     Title("Твіки системи",
           "Кожен твік вмикається окремо. Вимкнення повертає саме ті значення, що були до KairoBoost.");
@@ -1117,6 +1202,10 @@ static void PageTweaksUi(App& a) {
 
     int f = a.tweakFilter;
     TweakGrid(a, [f](const tw::Tweak& t) { return t.category != tw::Fortnite && (f < 0 || t.category == f); });
+    if (f < 0 || f == tw::Input) {
+        ImGui::Spacing();
+        KeyRepeatPanel(a);
+    }
 
     if (a.confirmRevert) {
         ImGui::OpenPopup("Відкотити все?");
@@ -2037,6 +2126,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     app.build = lb::WindowsBuild();
     LoadSettings(app);
     fn::SetManualDir(app.fnDir);
+    {
+        int d, i;
+        if (tw::ReadSystemKeyRepeat(d, i)) app.kbDelay = d, app.kbInterval = i;  // що реально стоїть у системі
+        tw::SetKeyRepeat(app.kbDelay, app.kbInterval);
+    }
     app.resMs = app.gameRes;
     lb::Log("KairoBoost запущено. Windows build %lu%s", app.build,
             app.elevated ? "" : " — [!] без прав адміністратора");

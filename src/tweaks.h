@@ -44,6 +44,12 @@ bool Revert(const Tweak& t);
 std::string Unavailable(const Tweak& t);
 
 void ApplyRecommended(bool includeFortnite);
+
+// Повтор клавіш (твік "keyboard", через FilterKeys): затримка перед повтором і інтервал між повторами, мс
+void SetKeyRepeat(int delayMs, int intervalMs);
+void GetKeyRepeat(int& delayMs, int& intervalMs);
+// Поточні значення з системи, якщо твік увімкнено (false — вимкнено)
+bool ReadSystemKeyRepeat(int& delayMs, int& intervalMs);
 void RevertEverything();
 
 }  // namespace tw

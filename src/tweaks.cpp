@@ -4,6 +4,7 @@
 #include <powersetting.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 
@@ -348,6 +349,17 @@ static void RefreshMouse() {
 }
 
 static const char* kKbResponse = "Control Panel\\Accessibility\\Keyboard Response";
+static std::atomic<int> g_kbDelay{150}, g_kbInterval{10};
+
+void SetKeyRepeat(int delayMs, int intervalMs) {
+    g_kbDelay = std::clamp(delayMs, 100, 1000);
+    g_kbInterval = std::clamp(intervalMs, 5, 500);
+}
+
+void GetKeyRepeat(int& delayMs, int& intervalMs) {
+    delayMs = g_kbDelay;
+    intervalMs = g_kbInterval;
+}
 
 // Стандартні налаштування Windows дозволяють максимум ~30 повторів/с із затримкою 250 мс.
 // Швидший повтор дає вбудована функція "Фільтрація введення" (FilterKeys) з власними інтервалами —
@@ -504,20 +516,25 @@ const std::vector<Tweak>& All() {
              },
              nullptr, nullptr, nullptr, RefreshMouse});
         add({"keyboard", Input, "Швидший повтор клавіш",
-             "Максимум: повтор через 150 мс і ~100 разів/с (стандартний максимум Windows — 250 мс і 30/с). "
-             "Діє в тексті, чаті, меню; на керування в грі не впливає.",
+             "Повтор утриманої клавіші швидше за максимум Windows (250 мс, 30/с); значення — повзунками нижче. "
+             "На керування в грі не впливає.",
              "Якщо під час набору часто дублюються символи. Вмикає «Фільтрацію введення» Windows (без фільтрації).",
              false, false,
              [] {
                  return std::vector<RegValue>{Sz(CU, "Control Panel\\Keyboard", "KeyboardDelay", "0"),
                                               Sz(CU, "Control Panel\\Keyboard", "KeyboardSpeed", "31"),
-                                              Sz(CU, kKbResponse, "AutoRepeatDelay", "150"),
-                                              Sz(CU, kKbResponse, "AutoRepeatRate", "10"),
+                                              Sz(CU, kKbResponse, "AutoRepeatDelay", std::to_string(g_kbDelay.load())),
+                                              Sz(CU, kKbResponse, "AutoRepeatRate", std::to_string(g_kbInterval.load())),
                                               Sz(CU, kKbResponse, "DelayBeforeAcceptance", "0"),
                                               Sz(CU, kKbResponse, "BounceTime", "0"),
                                               Sz(CU, kKbResponse, "Flags", "3")};  // увімкнено, без гарячої клавіші
              },
-             nullptr, nullptr, nullptr, RefreshKeyboard});
+             [] {
+                 std::string f;
+                 return lb::RegGetString(CU, kKbResponse, "Flags", f) && f == "3" &&
+                        lb::RegValueExists(CU, kKbResponse, "AutoRepeatRate");
+             },
+             nullptr, nullptr, RefreshKeyboard});
 
         // ---- Fortnite ----
         add({"fn_priority", Fortnite, "Високий пріоритет CPU для Fortnite",
@@ -551,6 +568,14 @@ const std::vector<Tweak>& All() {
         return v;
     }();
     return list;
+}
+
+bool ReadSystemKeyRepeat(int& delayMs, int& intervalMs) {
+    const Tweak* t = Find("keyboard");
+    if (!t || !IsOn(*t)) return false;
+    delayMs = RegInt(CU, kKbResponse, "AutoRepeatDelay", 150);
+    intervalMs = RegInt(CU, kKbResponse, "AutoRepeatRate", 10);
+    return true;
 }
 
 const char* EffectText(const Tweak& t) {
