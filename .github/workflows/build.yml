@@ -2,6 +2,8 @@ name: build
 on:
   push:
   workflow_dispatch:
+permissions:
+  contents: write  # потрібно, щоб публікувати реліз з exe
 jobs:
   windows:
     runs-on: windows-latest
@@ -15,5 +17,20 @@ jobs:
         with:
           name: KairoBoost
           path: |
+            build/Release/KairoBoost.exe
+            build/Release/KairoBoost-cli.exe
+      # Реліз із прямим посиланням на exe:
+      # https://github.com/<owner>/<repo>/releases/latest/download/KairoBoost.exe
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: KairoBoost (збірка ${{ github.run_number }})
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            Завантажити: **KairoBoost.exe** нижче (графічна версія). `KairoBoost-cli.exe` — консольна версія.
+            Запуск: двічі клацни і дозволь права адміністратора. Якщо Windows покаже «Windows захистила ваш ПК» — «Докладніше» → «Однаково запустити».
+          files: |
             build/Release/KairoBoost.exe
             build/Release/KairoBoost-cli.exe

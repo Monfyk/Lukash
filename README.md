@@ -8,6 +8,10 @@ Timer Resolution, твіки Windows, налаштування Fortnite, очи�
 ![Fortnite](docs/fortnite.png)
 ![Очистка ОЗУ](docs/ram.png)
 
+## ⬇ Завантажити
+
+**[KairoBoost.exe](https://github.com/Monfyk/Lukash/releases/latest/download/KairoBoost.exe)** — пряме посилання на останню версію (усі версії — у [Releases](https://github.com/Monfyk/Lukash/releases)).
+
 *Скриншоти зроблені у Wine, тому цифри таймера і пам'яті там не такі, як на справжній Windows.*
 
 ## Чесно про пінг
