@@ -1,5 +1,6 @@
 // KairoBoost — консольна версія (меню + командний рядок)
 #include "core.h"
+#include "advisor.h"
 #include "dns.h"
 #include "fortnite.h"
 #include "tweaks.h"
@@ -136,6 +137,21 @@ static void DnsMenu() {
     }
 }
 
+static void Advisor() {
+    printf("\n=== Порадник ===\n  Аналізую ПК...\n\n");
+    adv::SystemInfo info = adv::Collect();
+    printf("%s\n", info.Summary().c_str());
+    int lastLevel = -1;
+    for (auto& x : adv::Analyze(info)) {
+        if (x.level != lastLevel) {
+            printf("\n-- %s --\n", adv::LevelName(x.level));
+            lastLevel = x.level;
+        }
+        printf("  * %s%s\n    %s\n", x.title.c_str(),
+               x.action == adv::EnableTweak ? ("  [твік: " + x.tweakId + "]").c_str() : "", x.text.c_str());
+    }
+}
+
 static void TweaksMenu() {
     for (;;) {
         printf("\n=== Твіки ===\n");
@@ -191,6 +207,9 @@ static void MainMenu() {
         } else if (c == "8") {
             FlushDns();
             Pause();
+        } else if (c == "a") {
+            Advisor();
+            Pause();
         } else if (c == "9") {
             DnsMenu();
             Pause();
@@ -208,7 +227,8 @@ static void Usage() {
            "  --fortnite-ping                                пінг до регіонів Fortnite\n"
            "  --apply-recommended | --revert-all | --status\n"
            "  --clean-ram                                    очистити ОЗУ\n"
-           "  --dns-test | --dns Cloudflare | --dns-auto     тест / вибір DNS\n");
+           "  --dns-test | --dns Cloudflare | --dns-auto     тест / вибір DNS\n"
+           "  --advisor                                      порадник для твого ПК\n");
 }
 
 int main(int argc, char** argv) {
@@ -225,7 +245,7 @@ int main(int argc, char** argv) {
     }
     std::string game;
     bool gameMode = false, cleanRam = false, apply = false, revert = false, status = false, fnPing = false;
-    bool dnsTest = false, dnsAuto = false;
+    bool dnsTest = false, dnsAuto = false, advisor = false;
     std::string dnsSet;
     ULONG res = 0;
     int count = 20;
@@ -242,6 +262,7 @@ int main(int argc, char** argv) {
         else if (a == "--status") status = true;
         else if (a == "--fortnite-ping") fnPing = true;
         else if (a == "--dns-test") dnsTest = true;
+        else if (a == "--advisor") advisor = true;
         else if (a == "--dns-auto") dnsAuto = true;
         else if (a == "--dns" && i + 1 < argc) dnsSet = argv[++i];
         else if (a == "--count" && i + 1 < argc) count = std::max(1, atoi(argv[++i]));
@@ -261,6 +282,7 @@ int main(int argc, char** argv) {
     if (!pings.empty()) Compare(pings, count);
     if (fnPing) FortnitePing(count);
     if (dnsTest) DnsTest();
+    if (advisor) Advisor();
     if (dnsAuto) dns::Restore();
     if (!dnsSet.empty()) {
         bool found = false;

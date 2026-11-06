@@ -137,6 +137,15 @@ static bool DisplayModes(DEVMODEA& cur, DEVMODEA& best, int& distinct) {
     return true;
 }
 
+bool MonitorRefresh(unsigned& curHz, unsigned& maxHz) {
+    DEVMODEA cur, best;
+    int n;
+    if (!DisplayModes(cur, best, n)) return false;
+    curHz = cur.dmDisplayFrequency;
+    maxHz = best.dmDisplayFrequency;
+    return true;
+}
+
 static bool SetRefresh(DWORD hz) {
     DEVMODEA cur, best;
     int n;

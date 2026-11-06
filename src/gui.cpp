@@ -3,6 +3,7 @@
 #include "fortnite.h"
 #include "tweaks.h"
 #include "dns.h"
+#include "advisor.h"
 
 #include <shellapi.h>
 
@@ -171,7 +172,7 @@ struct LiveTarget {
     }
 };
 
-enum Page { PageHome, PageFortnite, PageTweaks, PageTimer, PageRam, PageNet, PageDns, PageGame, PageInfo, PageCount };
+enum Page { PageHome, PageAdvisor, PageFortnite, PageTweaks, PageTimer, PageRam, PageNet, PageDns, PageGame, PageInfo, PageCount };
 
 struct DnsRow {
     int provider = -1;  // -1 = поточний DNS від провайдера
@@ -225,6 +226,13 @@ struct App {
     std::string fnExe;
     bool fnRunning = false;
     bool onWifi = false;
+
+    // Порадник
+    Task advTask;
+    std::mutex advMutex;
+    adv::SystemInfo advInfo;
+    std::vector<adv::Advice> advList;
+    bool advReady = false, advStarted = false;
 
     // Повтор клавіш
     int kbDelay = 150, kbInterval = 10;
@@ -908,6 +916,8 @@ static void PageHomeUi(App& a) {
     ImGui::PopStyleColor(2);
     HelpText("Вмикає лише безпечні твіки з позначкою «рекомендовано» (зокрема для Fortnite). Решта — на сторінці "
              "«Твіки». Усе можна вимкнути назад.");
+    if (ImGui::Button("Порадник для мого ПК", ImVec2(S(220), S(40)))) a.page = PageAdvisor;
+    ImGui::SameLine();
     ImGui::BeginDisabled(a.tweakTask.running || on == total);
     if (AccentButton(on == total ? "Усе вже оптимізовано" : "Оптимізувати", ImVec2(S(220), S(40))))
         RunTweakJob(a, "*", [] { tw::ApplyRecommended(true); });
@@ -917,6 +927,227 @@ static void PageHomeUi(App& a) {
         ImGui::TextColored(kAccent2, "Застосовую...");
     }
     EndCard();
+}
+
+// ---------------------------------------------------------------------------
+// Порадник
+// ---------------------------------------------------------------------------
+
+static void StartAnalysis(App& a) {
+    a.advStarted = true;
+    a.advTask.Start([&a] {
+        adv::SystemInfo info = adv::Collect();
+        std::vector<adv::Advice> list = adv::Analyze(info);
+        int crit = 0;
+        for (auto& x : list) crit += x.level == adv::Critical;
+        {
+            std::lock_guard<std::mutex> l(a.advMutex);
+            a.advInfo = info;
+            a.advList = list;
+            a.advReady = true;
+        }
+        lb::Log("Порадник: %d порад, з них найважливіших — %d", (int)list.size(), crit);
+    });
+}
+
+static void CopyToClipboard(const std::string& utf8) {
+    int n = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, n * sizeof(wchar_t));
+    if (!mem) return;
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, (wchar_t*)GlobalLock(mem), n);
+    GlobalUnlock(mem);
+    if (OpenClipboard(nullptr)) {
+        EmptyClipboard();
+        SetClipboardData(CF_UNICODETEXT, mem);
+        CloseClipboard();
+    } else {
+        GlobalFree(mem);
+    }
+}
+
+static ImVec4 LevelColor(adv::Level l) {
+    switch (l) {
+        case adv::Critical: return kBad;
+        case adv::Recommended: return kAccent;
+        case adv::Optional: return kAccent2;
+        case adv::Good: return kGood;
+        default: return kMuted;
+    }
+}
+
+static Page PageByName(const std::string& n) {
+    if (n == "fortnite") return PageFortnite;
+    if (n == "ram") return PageRam;
+    if (n == "dns") return PageDns;
+    if (n == "net") return PageNet;
+    if (n == "timer") return PageTimer;
+    return PageHome;
+}
+
+// Виконати дію поради (у фоні), потім перевірити ПК знову
+static void RunAdvice(App& a, const adv::Advice& x) {
+    if (x.action == adv::OpenPage) {
+        a.page = PageByName(x.page);
+        return;
+    }
+    adv::Advice copy = x;
+    RunTweakJob(a, x.tweakId.empty() ? "advice" : x.tweakId, [&a, copy] {
+        if (copy.action == adv::EnableTweak || copy.action == adv::DisableTweak) {
+            if (const tw::Tweak* t = tw::Find(copy.tweakId)) {
+                if (copy.action == adv::EnableTweak) tw::Apply(*t); else tw::Revert(*t);
+            }
+        } else if (copy.action == adv::FortniteMaxFps) {
+            fn::Settings cur = fn::ReadSettings();
+            adv::SystemInfo info;
+            {
+                std::lock_guard<std::mutex> l(a.advMutex);
+                info = a.advInfo;
+            }
+            bool weak = info.physicalCores <= 4 || !info.HasDiscrete();
+            int fps = cur.fpsLimit && info.refreshMax && cur.fpsLimit < (int)info.refreshMax ? 0 : cur.fpsLimit;
+            fn::WriteSettings(fps, false, cur.performanceMode || weak, true, cur.lowGraphics);
+        }
+    });
+    a.advReady = false;
+    a.advStarted = false;  // після завершення дії — новий аналіз
+    a.fnTime = -1e9;
+}
+
+static void PageAdvisorUi(App& a) {
+    Title("Порадник", "Аналізує саме твій ПК і пояснює, що варто ввімкнути, а що ні. Працює без інтернету.");
+    if (!a.advStarted && !a.tweakTask.running) StartAnalysis(a);
+
+    std::lock_guard<std::mutex> l(a.advMutex);
+    if (!a.advReady) {
+        BeginCard("advwait", ImVec2(0, 0));
+        ImGui::TextColored(kAccent2, a.tweakTask.running ? "Застосовую..." : "Аналізую ПК...");
+        EndCard();
+        return;
+    }
+
+    // --- Твій ПК ---
+    BeginCard("advpc", ImVec2(0, 0));
+    SectionTitle("Твій ПК");
+    std::string sum = a.advInfo.Summary();
+    size_t pos = 0;
+    while (pos < sum.size()) {
+        size_t e = sum.find('\n', pos);
+        std::string line = sum.substr(pos, e == std::string::npos ? std::string::npos : e - pos);
+        if (!line.empty()) {
+            size_t c = line.find(": ");
+            if (c != std::string::npos) {
+                ImGui::TextColored(kMuted, "%s", line.substr(0, c + 1).c_str());
+                ImGui::SameLine();
+                ImGui::TextUnformatted(line.substr(c + 2).c_str());
+            } else {
+                ImGui::TextUnformatted(line.c_str());
+            }
+        }
+        if (e == std::string::npos) break;
+        pos = e + 1;
+    }
+    ImGui::Spacing();
+    ImGui::BeginDisabled(a.advTask.running || a.tweakTask.running);
+    if (ImGui::Button("Перевірити знову", ImVec2(S(180), S(34)))) {
+        a.advReady = false;
+        a.advStarted = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Скопіювати звіт", ImVec2(S(180), S(34)))) {
+        std::string rep = "KairoBoost — звіт про ПК\n\n" + sum + "\nПоради:\n";
+        for (auto& x : a.advList) rep += std::string("[") + adv::LevelName(x.level) + "] " + x.title + " — " + x.text + "\n";
+        CopyToClipboard(rep);
+        lb::Log("[OK] Звіт скопійовано в буфер обміну");
+    }
+    ImGui::SameLine();
+    int todo = 0;
+    for (auto& x : a.advList)
+        if ((x.level == adv::Critical || x.level == adv::Recommended) &&
+            (x.action == adv::EnableTweak || x.action == adv::FortniteMaxFps))
+            ++todo;
+    ImGui::BeginDisabled(todo == 0);
+    char btn[64];
+    snprintf(btn, sizeof(btn), todo ? "Застосувати важливе (%d)" : "Усе важливе застосовано", todo);
+    if (AccentButton(btn, ImVec2(S(260), S(34)))) {
+        std::vector<adv::Advice> list;
+        for (auto& x : a.advList)
+            if ((x.level == adv::Critical || x.level == adv::Recommended) &&
+                (x.action == adv::EnableTweak || x.action == adv::FortniteMaxFps))
+                list.push_back(x);
+        RunTweakJob(a, "advice", [list] {
+            for (auto& x : list) {
+                if (x.action == adv::EnableTweak) {
+                    if (const tw::Tweak* t = tw::Find(x.tweakId)) tw::Apply(*t);
+                } else {
+                    fn::Settings cur = fn::ReadSettings();
+                    fn::WriteSettings(cur.fpsLimit, false, true, true, cur.lowGraphics);
+                }
+            }
+        });
+        a.advReady = false;
+        a.advStarted = false;
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Вмикає всі поради «Найважливіше» і «Рекомендовано», які можна застосувати автоматично.");
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    EndCard();
+
+    // --- Поради за групами ---
+    for (int lvl = adv::Critical; lvl <= adv::NotForYou; ++lvl) {
+        bool any = false;
+        for (auto& x : a.advList) any |= x.level == lvl;
+        if (!any) continue;
+        ImGui::Spacing();
+        ImGui::PushID(lvl);
+        BeginCard("lvl", ImVec2(0, 0));
+        ImGui::PushFont(g_fontTitle);
+        ImGui::TextColored(LevelColor((adv::Level)lvl), "%s", adv::LevelName((adv::Level)lvl));
+        ImGui::PopFont();
+        int k = 0;
+        for (size_t i = 0; i < a.advList.size(); ++i) {
+            const adv::Advice& x = a.advList[i];
+            if (x.level != lvl) continue;
+            ImGui::PushID((int)i);
+            if (k++) ImGui::Separator();
+            float right = ImGui::GetContentRegionMax().x;
+            bool hasBtn = x.action != adv::None && lvl != adv::Good && lvl != adv::NotForYou;
+            ImGui::BeginGroup();
+            Dot(LevelColor((adv::Level)lvl));
+            ImGui::PushFont(g_fontBold);
+            ImGui::TextUnformatted(x.title.c_str());
+            ImGui::PopFont();
+            ImGui::PushTextWrapPos(hasBtn ? right - S(170) : right);
+            ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
+            ImGui::TextWrapped("%s", x.text.c_str());
+            ImGui::PopStyleColor();
+            ImGui::PopTextWrapPos();
+            ImGui::EndGroup();
+            if (hasBtn) {
+                ImGui::SameLine(right - S(150));
+                const char* label = x.action == adv::EnableTweak    ? "Увімкнути"
+                                    : x.action == adv::DisableTweak ? "Вимкнути"
+                                    : x.action == adv::OpenPage     ? "Відкрити"
+                                                                    : "Налаштувати";
+                ImGui::BeginDisabled(a.tweakTask.running);
+                bool click = lvl == adv::Critical ? AccentButton(label, ImVec2(S(150), S(34)), kBad)
+                                                  : ImGui::Button(label, ImVec2(S(150), S(34)));
+                ImGui::EndDisabled();
+                if (click) {
+                    adv::Advice copy = x;
+                    ImGui::PopID();
+                    EndCard();
+                    ImGui::PopID();
+                    // Мютекс тримаємо — RunAdvice його не чіпає синхронно
+                    RunAdvice(a, copy);
+                    return;
+                }
+            }
+            ImGui::PopID();
+        }
+        EndCard();
+        ImGui::PopID();
+    }
 }
 
 static void PageFortniteUi(App& a) {
@@ -1805,7 +2036,7 @@ static void DrawUi(App& a) {
     ImGui::TextColored(kMuted, "оптимізатор для Fortnite");
     ImGui::Dummy(ImVec2(0, S(14)));
 
-    const char* names[PageCount] = {"Головна",     "Fortnite",    "Твіки",     "Timer Resolution",
+    const char* names[PageCount] = {"Головна",     "Порадник",    "Fortnite",    "Твіки",     "Timer Resolution",
                                     "Очистка ОЗУ", "Тест мережі", "DNS",       "Режим гри",
                                     "Як це працює"};
     for (int i = 0; i < PageCount; ++i) {
@@ -1851,6 +2082,7 @@ static void DrawUi(App& a) {
     }
     switch (a.page) {
         case PageHome: PageHomeUi(a); break;
+        case PageAdvisor: PageAdvisorUi(a); break;
         case PageFortnite: PageFortniteUi(a); break;
         case PageTweaks: PageTweaksUi(a); break;
         case PageTimer: PageTimerUi(a); break;
@@ -2258,6 +2490,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     app.tweakTask.Join();
     app.ramTask.Join();
     app.dnsTask.Join();
+    app.advTask.Join();
     lb::SetLogSink(nullptr);
     lb::Shutdown();
 

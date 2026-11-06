@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 CXX=x86_64-w64-mingw32-g++
 FLAGS="-std=c++17 -O2 -static -s"
 IMGUI=third_party/imgui
-CORE="src/core.cpp src/tweaks.cpp src/fortnite.cpp src/dns.cpp"
+CORE="src/core.cpp src/tweaks.cpp src/fortnite.cpp src/dns.cpp src/advisor.cpp"
 LIBS="-lws2_32 -liphlpapi -ladvapi32 -lpowrprof -lpsapi"
 x86_64-w64-mingw32-windres src/app.rc -O coff -o app.res
 

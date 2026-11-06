@@ -48,6 +48,8 @@ void ApplyRecommended(bool includeFortnite);
 // Повтор клавіш (твік "keyboard", через FilterKeys): затримка перед повтором і інтервал між повторами, мс
 void SetKeyRepeat(int delayMs, int intervalMs);
 void GetKeyRepeat(int& delayMs, int& intervalMs);
+// Частота основного монітора: поточна і максимальна для поточної роздільності
+bool MonitorRefresh(unsigned& cur, unsigned& max);
 // Поточні значення з системи, якщо твік увімкнено (false — вимкнено)
 bool ReadSystemKeyRepeat(int& delayMs, int& intervalMs);
 void RevertEverything();
