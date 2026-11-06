@@ -242,11 +242,24 @@ static void RefreshMouse() {
     SystemParametersInfoA(SPI_SETMOUSE, 0, m, SPIF_SENDCHANGE);
 }
 
+static const char* kKbResponse = "Control Panel\\Accessibility\\Keyboard Response";
+
+// Стандартні налаштування Windows дозволяють максимум ~30 повторів/с із затримкою 250 мс.
+// Швидший повтор дає вбудована функція "Фільтрація введення" (FilterKeys) з власними інтервалами —
+// при нульових DelayBeforeAcceptance і BounceTime вона нічого не фільтрує, лише задає повтор.
 static void RefreshKeyboard() {
     SystemParametersInfoA(SPI_SETKEYBOARDDELAY, RegInt(CU, "Control Panel\\Keyboard", "KeyboardDelay", 1), nullptr,
                           SPIF_SENDCHANGE);
     SystemParametersInfoA(SPI_SETKEYBOARDSPEED, RegInt(CU, "Control Panel\\Keyboard", "KeyboardSpeed", 31), nullptr,
                           SPIF_SENDCHANGE);
+    FILTERKEYS fk{};
+    fk.cbSize = sizeof(fk);
+    fk.dwFlags = (DWORD)RegInt(CU, kKbResponse, "Flags", 126);
+    fk.iWaitMSec = (DWORD)RegInt(CU, kKbResponse, "DelayBeforeAcceptance", 1000);
+    fk.iDelayMSec = (DWORD)RegInt(CU, kKbResponse, "AutoRepeatDelay", 1000);
+    fk.iRepeatMSec = (DWORD)RegInt(CU, kKbResponse, "AutoRepeatRate", 500);
+    fk.iBounceMSec = (DWORD)RegInt(CU, kKbResponse, "BounceTime", 0);
+    SystemParametersInfoA(SPI_SETFILTERKEYS, sizeof(fk), &fk, SPIF_SENDCHANGE);
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +299,8 @@ const std::vector<Tweak>& All() {
              "Якщо стрімиш або записуєш відео тим самим ПК — запис може смикатися.", true, true,
              [] { return std::vector<RegValue>{Dw(LM, kSysProfile, "SystemResponsiveness", 10)}; }});
         add({"gamemode", System, "Ігровий режим Windows",
-             "Windows віддає грі пріоритет і не встановлює оновлення під час гри.", "Немає суттєвих мінусів.", false,
+             "Windows віддає грі пріоритет і не встановлює оновлення під час гри. У Windows 10/11 зазвичай уже "
+             "ввімкнено — твік гарантує, що його ніхто не вимкнув.", "Немає суттєвих мінусів.", false,
              true, [] {
                  return std::vector<RegValue>{Dw(CU, "Software\\Microsoft\\GameBar", "AutoGameModeEnabled", 1),
                                               Dw(CU, "Software\\Microsoft\\GameBar", "AllowAutoGameMode", 1)};
@@ -367,11 +381,18 @@ const std::vector<Tweak>& All() {
              },
              nullptr, nullptr, nullptr, RefreshMouse});
         add({"keyboard", Input, "Швидший повтор клавіш",
-             "Мінімальна затримка перед повтором і максимальна швидкість повтору клавіш.",
-             "Якщо часто випадково дублюються символи під час набору тексту.", false, false,
+             "Максимум: повтор через 150 мс і ~100 разів/с (стандартний максимум Windows — 250 мс і 30/с). "
+             "Діє в тексті, чаті, меню; на керування в грі не впливає.",
+             "Якщо під час набору часто дублюються символи. Вмикає «Фільтрацію введення» Windows (без фільтрації).",
+             false, false,
              [] {
                  return std::vector<RegValue>{Sz(CU, "Control Panel\\Keyboard", "KeyboardDelay", "0"),
-                                              Sz(CU, "Control Panel\\Keyboard", "KeyboardSpeed", "31")};
+                                              Sz(CU, "Control Panel\\Keyboard", "KeyboardSpeed", "31"),
+                                              Sz(CU, kKbResponse, "AutoRepeatDelay", "150"),
+                                              Sz(CU, kKbResponse, "AutoRepeatRate", "10"),
+                                              Sz(CU, kKbResponse, "DelayBeforeAcceptance", "0"),
+                                              Sz(CU, kKbResponse, "BounceTime", "0"),
+                                              Sz(CU, kKbResponse, "Flags", "3")};  // увімкнено, без гарячої клавіші
              },
              nullptr, nullptr, nullptr, RefreshKeyboard});
 
@@ -400,9 +421,19 @@ const std::vector<Tweak>& All() {
              "Не допоможе, якщо в мережі ніхто інший нічого не качає.", false, true, nullptr,
              [] { return lb::QosIsSet(fn::kExe); }, [] { return lb::QosApply(fn::kExe); },
              [] { return lb::QosRemove(fn::kExe); }});
+        // Ці твіки підхоплюються при наступному запуску гри
+        for (auto& t : v)
+            for (const char* id : {"gamedvr", "fso", "fn_priority", "fn_gpu", "fn_fso", "fn_qos"})
+                if (std::string(t.id) == id) t.gameRestart = true;
         return v;
     }();
     return list;
+}
+
+const char* EffectText(const Tweak& t) {
+    if (t.reboot) return "після перезавантаження ПК";
+    if (t.gameRestart) return "після перезапуску гри";
+    return "одразу";
 }
 
 const Tweak* Find(const std::string& id) {
@@ -438,7 +469,7 @@ bool Apply(const Tweak& t) {
         for (auto& r : regs) ok = lb::RegApply(r) && ok;
     }
     if (t.after) t.after();
-    lb::Log("[%s] Увімкнено: %s%s", ok ? "OK" : "ПОМИЛКА", t.name, ok && t.reboot ? " (після перезавантаження)" : "");
+    lb::Log("[%s] Увімкнено: %s%s%s", ok ? "OK" : "ПОМИЛКА", t.name, ok ? " — діє " : "", ok ? EffectText(t) : "");
     return ok;
 }
 

@@ -30,7 +30,11 @@ struct Tweak {
     std::function<bool()> revert;
     std::function<void()> after;  // після apply/revert (напр. застосувати налаштування миші одразу)
     std::function<std::string()> unavailable;  // непорожній рядок = твік недоступний (причина)
+
+    bool gameRestart = false;  // діє з наступного запуску гри
 };
+// Коли твік починає діяти: "одразу", "після перезапуску гри" або "після перезавантаження"
+const char* EffectText(const Tweak& t);
 
 const std::vector<Tweak>& All();
 const Tweak* Find(const std::string& id);

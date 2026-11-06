@@ -644,10 +644,14 @@ static void TweakCard(App& a, size_t idx, float width) {
     if (unavailable) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.55f);
 
     Pill(t.category == tw::Input ? "Ввід" : tw::CategoryName(t.category), CategoryColor(t.category));
-    if (t.reboot) {
+    if (t.reboot || t.gameRestart) {
         ImGui::SameLine();
-        Pill("рестарт", kMuted);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Набуде чинності після перезавантаження ПК");
+        Pill(t.reboot ? "рестарт ПК" : "перезапуск гри", kMuted);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Почне діяти %s", tw::EffectText(t));
+    } else {
+        ImGui::SameLine();
+        Pill("одразу", Fade(kGood, 0.9f));
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Діє одразу після ввімкнення");
     }
     ImGui::SameLine(ImGui::GetContentRegionMax().x - S(46));
     ImGui::BeginDisabled(busy || unavailable);
