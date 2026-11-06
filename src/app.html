@@ -1,0 +1,405 @@
+<title>Образ дня</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;0,6..96,700;1,6..96,500&family=Manrope:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one-column phone app — today's look as a "face chart" card, steps as a checklist, bottom tab bar */
+:root{
+  --bg:#f6f1f3; --surface:#ffffff; --sunk:#efe6ea;
+  --ink:#2b1d27; --muted:#7a6872; --line:#e3d6dc;
+  --accent:#a3264f; --accent-ink:#ffffff; --accent-soft:#f5dbe4;
+  --ok:#3f7a5a;
+  --display:"Bodoni Moda", "Didot", "Times New Roman", serif;
+  --body:"Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --r:14px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#1a1218; --surface:#251a22; --sunk:#2f222b;
+  --ink:#f3e7ed; --muted:#b39fab; --line:#3b2c36;
+  --accent:#e8789d; --accent-ink:#1a1218; --accent-soft:#45263a; --ok:#7cc59b; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#1a1218; --surface:#251a22; --sunk:#2f222b;
+  --ink:#f3e7ed; --muted:#b39fab; --line:#3b2c36;
+  --accent:#e8789d; --accent-ink:#1a1218; --accent-soft:#45263a; --ok:#7cc59b; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--bg)}
+body{color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;-webkit-tap-highlight-color:transparent}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:560px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:18px 110px;display:flex;flex-direction:column;gap:18px}
+h1,h2,h3{font-family:var(--display);font-weight:700;margin:0;text-wrap:balance;line-height:1.1}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* header */
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.top h1{font-size:30px}
+.top h1 em{font-style:italic;font-weight:500;color:var(--accent)}
+.streak{text-align:right;font-size:12px;color:var(--muted)}
+.streak b{display:block;font-family:var(--display);font-size:26px;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1}
+
+/* chips */
+.filters{display:flex;flex-direction:column;gap:8px}
+.chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:6px 13px;font-size:13px;font-weight:600;color:var(--muted)}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+
+/* look card */
+.look{background:var(--surface);border:1px solid var(--line);border-radius:22px;overflow:hidden}
+.swatches{display:flex;height:74px}
+.swatches span{flex:1}
+.look-body{padding:18px 18px 20px;display:flex;flex-direction:column;gap:14px}
+.look h2{font-size:28px}
+.mood{color:var(--muted);margin:0;font-size:14.5px}
+.meta{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:12px;font-weight:600;background:var(--sunk);border-radius:6px;padding:3px 8px;color:var(--ink)}
+.tag.acc{background:var(--accent-soft);color:var(--accent)}
+.shades{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.shade{display:flex;gap:9px;align-items:center;min-width:0}
+.dot{width:26px;height:26px;border-radius:50%;flex:none;border:1px solid var(--line)}
+.shade div{min-width:0;font-size:12.5px;line-height:1.25}
+.shade small{display:block;color:var(--muted)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:10px 14px;font-weight:600;font-size:14px;display:inline-flex;gap:6px;align-items:center}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.grow{flex:1;justify-content:center}
+.fav[aria-pressed="true"]{color:var(--accent);border-color:var(--accent)}
+
+/* steps */
+.section-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.section-h h3{font-size:21px}
+.progress{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.bar{height:4px;background:var(--sunk);border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.step{display:grid;grid-template-columns:28px 1fr;gap:12px;padding:12px 4px;border-bottom:1px solid var(--line);cursor:pointer;align-items:start}
+.step:last-child{border-bottom:0}
+.box{width:24px;height:24px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;margin-top:1px;transition:.2s}
+.step.done .box{background:var(--accent);border-color:var(--accent)}
+.step.done .box::after{content:"";width:9px;height:5px;border:2px solid var(--accent-ink);border-top:0;border-right:0;transform:rotate(-45deg) translate(1px,-1px)}
+.step .area{font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700;color:var(--accent)}
+.step p{margin:2px 0 0;min-width:0}
+.step.done p{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}
+.tip{background:var(--accent-soft);border-radius:var(--r);padding:12px 14px;font-size:14px}
+.tip b{color:var(--accent)}
+
+/* finish panel */
+.finish{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px}
+.hearts{display:flex;gap:4px}
+.hearts button{border:0;background:none;font-size:26px;line-height:1;padding:2px;color:var(--line)}
+.hearts button.on{color:var(--accent)}
+textarea{width:100%;min-height:64px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;padding:10px;resize:vertical}
+.done-msg{color:var(--ok);font-weight:600;font-size:14px}
+
+/* catalog + history */
+.list{display:flex;flex-direction:column;gap:10px}
+.row{display:grid;grid-template-columns:54px 1fr auto;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;text-align:left;width:100%}
+.mini{display:grid;grid-template-columns:1fr 1fr;width:54px;height:54px;border-radius:10px;overflow:hidden}
+.row h4{margin:0;font-family:var(--display);font-size:17px;line-height:1.2}
+.row small{color:var(--muted);font-size:12.5px}
+.row .side{font-size:12px;color:var(--muted);text-align:right;white-space:nowrap}
+.row .side .h{color:var(--accent);font-size:14px}
+.row div{min-width:0}
+.note{display:block;color:var(--ink);font-size:13px;margin-top:2px}
+.empty{color:var(--muted);text-align:center;padding:30px 10px;border:1px dashed var(--line);border-radius:var(--r)}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center}
+.week div{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
+.week span{width:32px;height:32px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:13px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.week .on span{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.week .today span{border-color:var(--ink);color:var(--ink)}
+.week .on.today span{color:var(--accent-ink)}
+
+/* tab bar */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:env(safe-area-inset-bottom,0px);padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px));z-index:5}
+nav.tabs .in{display:flex;max-width:560px;width:100%}
+nav.tabs button{flex:1;border:0;background:none;padding:10px 4px 12px;font-size:12px;font-weight:600;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px}
+nav.tabs button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7}
+nav.tabs button[aria-selected="true"]{color:var(--accent)}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:99px;font-size:13.5px;font-weight:600;opacity:0;transition:opacity .25s;pointer-events:none;z-index:20;white-space:nowrap}
+.toast.show{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow" id="today-label">Сьогодні</div>
+      <h1>Образ <em>дня</em></h1>
+    </div>
+    <div class="streak"><b id="streak">0</b>днів поспіль</div>
+  </header>
+
+  <!-- TODAY -->
+  <section id="view-today" class="wrap-in" style="display:flex;flex-direction:column;gap:18px">
+    <div class="filters">
+      <div class="chips" id="occ-chips" aria-label="Привід"></div>
+      <div class="chips" id="time-chips" aria-label="Час"></div>
+    </div>
+
+    <article class="look" id="look"></article>
+
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="section-h"><h3>Кроки</h3><span class="progress" id="progress">0 / 0</span></div>
+      <div class="bar"><i id="bar"></i></div>
+      <ol class="steps" id="steps"></ol>
+    </div>
+
+    <div class="tip" id="tip"></div>
+
+    <div class="finish" id="finish">
+      <div class="section-h"><h3>Як вийшло?</h3></div>
+      <div class="hearts" id="hearts" aria-label="Оцінка"></div>
+      <label class="eyebrow" for="note">Нотатка</label>
+      <textarea id="note" placeholder="Напр.: стрілки вийшли рівно, наступного разу менше рум'ян"></textarea>
+      <button class="btn primary grow" id="save-done">Зберегти в щоденник</button>
+      <div class="done-msg" id="done-msg" hidden></div>
+    </div>
+  </section>
+
+  <!-- CATALOG -->
+  <section id="view-catalog" hidden style="display:flex;flex-direction:column;gap:14px">
+    <h2 style="font-size:26px">Усі образи</h2>
+    <div class="chips" id="cat-chips"></div>
+    <div class="list" id="catalog"></div>
+  </section>
+
+  <!-- HISTORY -->
+  <section id="view-history" hidden style="display:flex;flex-direction:column;gap:14px">
+    <h2 style="font-size:26px">Щоденник</h2>
+    <div class="week" id="week"></div>
+    <div class="list" id="history"></div>
+  </section>
+</div>
+
+<nav class="tabs" role="tablist">
+  <div class="in">
+    <button role="tab" data-view="today" aria-selected="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Сьогодні</button>
+    <button role="tab" data-view="catalog" aria-selected="false"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>Каталог</button>
+    <button role="tab" data-view="history" aria-selected="false"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Щоденник</button>
+  </div>
+</nav>
+<div class="toast" id="toast"></div>
+
+<script>
+const LOOKS = [
+ {id:"nude-fresh",name:"Свіже нюдове обличчя",occ:["day","work"],min:8,level:"Легко",mood:"Шкіра, що світиться, і нічого зайвого. Ідеально, коли поспішаєш.",
+  pal:[["#E9C9B4","Тон / кушон","сатин"],["#E8A79A","Рум'яна","кремові"],["#C9A27E","Брови","гель"],["#D8988E","Бальзам","з відтінком"]],
+  steps:[["Шкіра","Зволожуючий крем + SPF, дай вбратися 1–2 хв."],["Тон","Кушон тонким шаром лише в центрі обличчя, розтушуй до країв."],["Консилер","Точково під очі та на почервоніння, вбий пальцем."],["Брови","Прозорий гель: розчеши вгору і трохи вбік."],["Щоки","Кремові рум'яна на яблучка щік, розтушуй до скронь."],["Вії","Один шар коричневої туші."],["Губи","Тінтований бальзам."]],
+  tip:"Кремові текстури наноси пальцями — тепло рук робить їх природнішими."},
+ {id:"soft-brown-smoky",name:"М'який коричневий смокі",occ:["date","party"],min:20,level:"Середньо",mood:"Димчасті очі без чорного: тепло, глибоко, дуже жіночно.",
+  pal:[["#C49A7A","Перехідний","матові"],["#7A4E3A","Шоколад","матові"],["#B98A5E","Бронза","шимер"],["#B76E6E","Помада","сатин"]],
+  steps:[["Основа","Тон і консилер як звичайно, праймер на повіки."],["Очі","Перехідний відтінок у складку повіки широкою пухнастою пензлею."],["Очі","Шоколадний — у зовнішній кут клином, розтушуй вгору."],["Очі","Бронзовий шимер пальцем на центр рухомої повіки."],["Очі","Шоколадний тонкою пензлею під нижні вії, з'єднай із клином."],["Вії","Два шари чорної туші."],["Губи","Пудрово-рожева помада, без контуру."]],
+  tip:"Розтушовуй більше, ніж здається потрібним — меж бути не повинно."},
+ {id:"classic-winged",name:"Класичні стрілки",occ:["work","date"],min:15,level:"Середньо",mood:"Акуратна графічна стрілка і чисте обличчя. Вічна класика.",
+  pal:[["#E7C3AA","Тон","матовий"],["#1C1A1C","Підводка","фломастер"],["#D49C93","Рум'яна","пудра"],["#B05A5A","Помада","сатин"]],
+  steps:[["Основа","Тон, консилер, легке пудрування Т-зони."],["Очі","Нанеси трохи пудри на повіку, щоб підводка не відбивалась."],["Стрілка","Познач хвостик: продовж лінію нижніх вій до кінця брови."],["Стрілка","З'єднай хвостик із серединою верхніх вій, заповни трикутник."],["Стрілка","Тонка лінія від внутрішнього кута до стрілки."],["Вії","Туш, особливо на зовнішні вії."],["Губи","Помада теракотово-рожева."]],
+  tip:"Виправляй помилки ватною паличкою з міцелярною водою — краще, ніж ще шар підводки."},
+ {id:"red-lip",name:"Червона помада",occ:["date","party","holiday"],min:12,level:"Середньо",mood:"Одна сміла деталь — все інше мінімально.",
+  pal:[["#E6C2A8","Тон","сатин"],["#9E1B2F","Червона","матова"],["#9E1B2F","Олівець","в тон"],["#C9A27E","Брови","олівець"]],
+  steps:[["Основа","Рівний тон, консилер навколо губ."],["Брови","Олівцем заповни прогалини, гелем зафіксуй."],["Очі","Тільки туш, без тіней."],["Губи","Олівцем окресли контур, заштрихуй усю губу."],["Губи","Помада пензлем від центру до кутиків."],["Губи","Промокни серветкою, нанеси другий шар."],["Фініш","Консилером підчисть контур губ."]],
+  tip:"Холодний червоний (з синім підтоном) візуально відбілює зуби."},
+ {id:"peach-glow",name:"Персикове сяйво",occ:["day","date"],min:12,level:"Легко",mood:"Тепле літнє обличчя, ніби щойно з моря.",
+  pal:[["#F2B28E","Персик","кремові"],["#E8B04F","Хайлайтер","золото"],["#D9926A","Тіні","сатин"],["#E58F7C","Блиск","прозорий"]],
+  steps:[["Основа","Легкий тон або BB-крем."],["Щоки","Персикові рум'яна на щоки та трохи на ніс."],["Очі","Ті самі рум'яна пальцем на повіку — монохром."],["Сяйво","Хайлайтер на вилиці, спинку носа, над губою."],["Вії","Коричнева туш."],["Губи","Персиковий блиск."]],
+  tip:"Один продукт на щоки, очі й губи — найшвидший спосіб зробити образ цілісним."},
+ {id:"glitter-party",name:"Блиск для вечірки",occ:["party","holiday"],min:25,level:"Складно",mood:"Сяйво на повіках, яке видно з іншого кінця зали.",
+  pal:[["#D7B8A3","База","матові"],["#6B4A68","Слива","матові"],["#E2C17A","Глітер","золото"],["#A65B6E","Помада","сатин"]],
+  steps:[["Основа","Стійкий тон, праймер на повіки обов'язково."],["Очі","Сливовий відтінок у складку і зовнішній кут."],["Очі","На рухому повіку — липка база для глітеру."],["Очі","Глітер пальцем, вбиваючи, а не розтираючи."],["Очі","Скотчем зніми частинки глітеру з-під очей."],["Вії","Накладні пучки або 3 шари туші."],["Губи","Ягідна помада, фіксуюча пудра на обличчя."]],
+  tip:"Роби очі до тону — так осипання глітеру легко прибрати."},
+ {id:"no-makeup",name:"Макіяж без макіяжу",occ:["day","work"],min:6,level:"Легко",mood:"Ти, тільки краще виспана.",
+  pal:[["#E8CDBB","Консилер","кремовий"],["#C8A487","Брови","гель"],["#E3A4A0","Тінт","для губ і щік"],["#5A3E33","Туш","коричнева"]],
+  steps:[["Шкіра","Крем + SPF."],["Консилер","Тільки там, де треба: під очі, крила носа."],["Брови","Тонований гель вгору."],["Тінт","Тінт на губи і пару крапель на щоки, розтушуй."],["Вії","Один шар туші тільки на кінчики."]],
+  tip:"Не пудри все обличчя — залиш природний блиск на вилицях."},
+ {id:"bold-graphic",name:"Кольорова графіка",occ:["party"],min:18,level:"Складно",mood:"Яскрава кольорова стрілка — для настрою пограти.",
+  pal:[["#E6C3AA","Тон","сатин"],["#2E6FBA","Кобальт","підводка"],["#F2D0D6","Нюд губи","кремова"],["#1C1A1C","Туш","чорна"]],
+  steps:[["Основа","Чистий тон, мінімум рум'ян."],["Очі","Кобальтова стрілка як класична, але товща."],["Очі","Тонка лінія кольору під нижніми віями у зовнішній третині."],["Вії","Чорна туш, верх і низ."],["Губи","Світлий нюд, щоб не сперечався з очима."]],
+  tip:"Якщо колір здається занадто сміливим — роби тільки нижню лінію."},
+ {id:"berry-stain",name:"Ягідні губи",occ:["date","holiday"],min:10,level:"Легко",mood:"Ефект «щойно з'їла вишню» — осінній, затишний.",
+  pal:[["#E3C0A6","Тон","сатин"],["#7C2340","Ягода","тінт"],["#C08B8B","Рум'яна","пудра"],["#B58C6C","Тіні","матові"]],
+  steps:[["Основа","Тон і консилер."],["Очі","Тауповий матовий відтінок по всій повіці."],["Вії","Туш у два шари."],["Щоки","Пудрові рум'яна в тон губам."],["Губи","Тінт пальцем у центр губ, розтушуй до країв — без чітких меж."]],
+  tip:"Вбивай тінт пальцем — так виходить розмитий, модний край."},
+ {id:"clean-girl",name:"Глянцева «clean girl»",occ:["day","work","date"],min:10,level:"Легко",mood:"Гладкі брови, глянцеві повіки, сяйво зволоженої шкіри.",
+  pal:[["#EAD0BE","Скін-тінт","сяючий"],["#D9908A","Рум'яна","рідкі"],["#C2A285","Брови","мило"],["#C98A80","Олія","для губ"]],
+  steps:[["Шкіра","Зволоження та скін-тінт."],["Брови","Мило для брів — пригладь вгору, як щіточка."],["Повіки","Крапля бальзаму або прозорого глосу на повіки."],["Щоки","Рідкі рум'яна високо на вилиці."],["Губи","Олійка для губ або лайнер + прозорий блиск."]],
+  tip:"Глянцеві повіки не дружать із тінями — тільки бальзам і туш."},
+ {id:"cat-eye-smoke",name:"Розтушована котяча стрілка",occ:["date","party"],min:15,level:"Середньо",mood:"Стрілка, яка не мусить бути ідеальною.",
+  pal:[["#E3C2AA","Тон","сатин"],["#3B2A30","Олівець","кайал"],["#5A4148","Тіні","матові"],["#B87A72","Помада","нюд"]],
+  steps:[["Основа","Тон, консилер."],["Очі","М'яким олівцем намалюй стрілку вздовж вій."],["Очі","Одразу розтушуй її пензлем з темними тінями вгору і вбік."],["Очі","Олівець на слизову верхньої повіки."],["Вії","Об'ємна туш."],["Губи","Нюдова помада."]],
+  tip:"Розтушовуй, поки олівець ще не застиг — секунд 30."},
+ {id:"holiday-gold",name:"Святкове золото",occ:["holiday","party"],min:20,level:"Середньо",mood:"Для свят, фото і шампанського.",
+  pal:[["#E1BFA4","Тон","сатин"],["#C79A45","Золото","фольга"],["#6A4630","Коричневий","матовий"],["#8E2A34","Вино","помада"]],
+  steps:[["Основа","Стійкий тон, легкий контур вилиць."],["Очі","Коричневий у складку повіки."],["Очі","Золото пальцем на всю рухому повіку."],["Очі","Краплю золота у внутрішній кут ока."],["Вії","Туш, можна пучки у зовнішньому куті."],["Губи","Винна помада, контур олівцем."]],
+  tip:"Змочи пензлик спреєм-фіксатором перед золотом — колір буде як фольга."},
+ {id:"soft-pink-mono",name:"Ніжний рожевий монохром",occ:["day","date"],min:10,level:"Легко",mood:"Рожеві щоки, рожеві повіки, рожеві губи — романтично.",
+  pal:[["#E9C7B6","Тон","легкий"],["#E7A1B0","Рожевий","кремовий"],["#D88A9C","Помада","сатин"],["#F3D9DF","Хайлайт","перлинний"]],
+  steps:[["Основа","Легкий тон."],["Очі","Рожеві тіні або рум'яна на повіку, розтушуй до складки."],["Щоки","Той самий рожевий на щоки."],["Сяйво","Перлинний хайлайтер на внутрішній кут ока та вилиці."],["Вії","Туш."],["Губи","Рожева помада, промокни для м'якості."]],
+  tip:"Холодний рожевий пасує світлій шкірі, теплий кораловий — смаглявій."},
+ {id:"office-matte",name:"Матовий офісний",occ:["work"],min:12,level:"Легко",mood:"Тримається весь день і не блищить на відеодзвінках.",
+  pal:[["#E2C1A8","Тон","матовий"],["#B79178","Тіні","тауп"],["#C9867E","Рум'яна","пудра"],["#A9665F","Помада","матова"]],
+  steps:[["Основа","Матуючий праймер на Т-зону, стійкий тон."],["Пудра","Розсипчаста пудра під очі та на Т-зону."],["Брови","Олівець + гель."],["Очі","Тауп по всій повіці, трохи темніше у зовнішній кут."],["Щоки","Пудрові рум'яна."],["Губи","Матова помада трохи темніша за природний колір губ."]],
+  tip:"Візьми з собою серветки, що матують, а не пудру — менше шарів удень."},
+ {id:"sunset-eyes",name:"Захід сонця на повіках",occ:["party","date"],min:20,level:"Складно",mood:"Градієнт від коралу до бордо — як вечірнє небо.",
+  pal:[["#F0A07A","Корал","матові"],["#D2603C","Помаранч","матові"],["#7A2A3A","Бордо","матові"],["#D9A08A","Нюд губи","сатин"]],
+  steps:[["Основа","Тон і праймер на повіки."],["Очі","Корал у внутрішню третину повіки."],["Очі","Помаранчевий у центр, розтушуй межу з коралом."],["Очі","Бордо у зовнішній кут і складку."],["Очі","Бордо тонко під нижні вії."],["Вії","Туш."],["Губи","Нейтральний нюд."]],
+  tip:"Йди від світлого до темного, і щоразу чистою пензлею розмивай межі."},
+ {id:"five-min",name:"П'ять хвилин",occ:["day","work"],min:5,level:"Легко",mood:"Мінімум, щоб виглядати зібраною.",
+  pal:[["#E6C9B6","Консилер","кремовий"],["#C49E80","Брови","гель"],["#DE9C92","Стік","для щік і губ"],["#2A2224","Туш","чорна"]],
+  steps:[["Консилер","Під очі."],["Брови","Гель."],["Стік","Той самий стік на щоки і губи."],["Вії","Туш."]],
+  tip:"Тримай ці 4 продукти в одній косметичці — і жодних пошуків зранку."}
+];
+const OCC = [["any","Будь-який"],["day","Щодня"],["work","Робота"],["date","Побачення"],["party","Вечірка"],["holiday","Свято"]];
+const TIME = [["any","Будь-який час"],["10","до 10 хв"],["15","до 15 хв"],["25","до 25 хв"]];
+const OCC_NAME = Object.fromEntries(OCC);
+
+const store = {
+  get(k,d){try{const v=localStorage.getItem("obraz:"+k);return v?JSON.parse(v):d}catch(e){return d}},
+  set(k,v){try{localStorage.setItem("obraz:"+k,JSON.stringify(v))}catch(e){}}
+};
+const pad=n=>String(n).padStart(2,"0");
+const dayKey=(d=new Date())=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const TODAY = dayKey();
+const $=s=>document.querySelector(s);
+
+let state = {
+  occ: store.get("occ","any"), time: store.get("time","any"),
+  favs: store.get("favs",[]), log: store.get("log",{}), // log[date] = {id, rating, note}
+  pick: store.get("pick",{}), // pick[date] = {id, offset}
+  checks: store.get("checks",{}), // checks[date+id] = [bool]
+  rating: 0, catFilter: "all"
+};
+
+function hash(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619)}return Math.abs(h)}
+function candidates(){
+  return LOOKS.filter(l=>(state.occ==="any"||l.occ.includes(state.occ))&&(state.time==="any"||l.min<=+state.time));
+}
+function currentLook(){
+  const p=state.pick[TODAY];
+  if(p&&p.id&&p.manual) return LOOKS.find(l=>l.id===p.id)||LOOKS[0];
+  const c=candidates(); const list=c.length?c:LOOKS;
+  const off=(p&&p.offset)||0;
+  // avoid repeating yesterday's look when possible
+  let i=(hash(TODAY)+off)%list.length;
+  const y=new Date();y.setDate(y.getDate()-1);const yl=state.log[dayKey(y)];
+  if(yl&&list.length>1&&list[i].id===yl.id) i=(i+1)%list.length;
+  return list[i];
+}
+function save(){["occ","time","favs","log","pick","checks"].forEach(k=>store.set(k,state[k]))}
+function toast(t){const el=$("#toast");el.textContent=t;el.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove("show"),1800)}
+
+function chips(el,items,cur,onPick){
+  el.innerHTML="";
+  items.forEach(([v,label])=>{const b=document.createElement("button");b.className="chip";b.textContent=label;b.setAttribute("aria-pressed",v===cur);b.onclick=()=>onPick(v);el.appendChild(b)});
+}
+function shadeHTML(p){return `<div class="shade"><span class="dot" style="background:${p[0]}"></span><div>${p[1]}<small>${p[2]} · ${p[0]}</small></div></div>`}
+
+function renderToday(){
+  const d=new Date();
+  $("#today-label").textContent=d.toLocaleDateString("uk-UA",{weekday:"long",day:"numeric",month:"long"});
+  chips($("#occ-chips"),OCC,state.occ,v=>{state.occ=v;state.pick[TODAY]={offset:0};save();renderToday()});
+  chips($("#time-chips"),TIME,state.time,v=>{state.time=v;state.pick[TODAY]={offset:0};save();renderToday()});
+  const L=currentLook(); const fav=state.favs.includes(L.id);
+  $("#look").innerHTML=`
+    <div class="swatches">${L.pal.map(p=>`<span style="background:${p[0]}"></span>`).join("")}</div>
+    <div class="look-body">
+      <div><div class="eyebrow">Образ дня</div><h2>${L.name}</h2></div>
+      <p class="mood">${L.mood}</p>
+      <div class="meta"><span class="tag acc">${L.min} хв</span><span class="tag">${L.level}</span>${L.occ.map(o=>`<span class="tag">${OCC_NAME[o]}</span>`).join("")}</div>
+      <div class="shades">${L.pal.map(shadeHTML).join("")}</div>
+      <div class="actions">
+        <button class="btn grow" id="shuffle">↻ Інший образ</button>
+        <button class="btn fav" id="fav" aria-pressed="${fav}">${fav?"♥ В улюблених":"♡ Улюблене"}</button>
+      </div>
+    </div>`;
+  $("#shuffle").onclick=()=>{const p=state.pick[TODAY]||{offset:0};state.pick[TODAY]={offset:(p.manual?0:(p.offset||0))+1};save();renderToday();window.scrollTo({top:0,behavior:"smooth"})};
+  $("#fav").onclick=()=>{state.favs=fav?state.favs.filter(x=>x!==L.id):[...state.favs,L.id];save();renderToday();toast(fav?"Прибрано з улюблених":"Додано в улюблені")};
+
+  const key=TODAY+":"+L.id; const ch=state.checks[key]||L.steps.map(()=>false);
+  $("#steps").innerHTML=L.steps.map((s,i)=>`<li class="step ${ch[i]?"done":""}" data-i="${i}" role="checkbox" aria-checked="${!!ch[i]}" tabindex="0"><span class="box"></span><div><div class="area">${s[0]}</div><p>${s[1]}</p></div></li>`).join("");
+  const n=ch.filter(Boolean).length;
+  $("#progress").textContent=`${n} / ${L.steps.length}`;
+  $("#bar").style.width=(n/L.steps.length*100)+"%";
+  $("#steps").querySelectorAll(".step").forEach(li=>{
+    const t=()=>{ch[+li.dataset.i]=!ch[+li.dataset.i];state.checks[key]=ch;save();renderToday();if(ch.every(Boolean))toast("Готово! Ти красуня ✨")};
+    li.onclick=t;li.onkeydown=e=>{if(e.key===" "||e.key==="Enter"){e.preventDefault();t()}};
+  });
+  $("#tip").innerHTML=`<b>Порада.</b> ${L.tip}`;
+
+  const done=state.log[TODAY];
+  if(done&&done.id===L.id){state.rating=done.rating;if(document.activeElement!==$("#note"))$("#note").value=done.note||""}
+  renderHearts();
+  $("#done-msg").hidden=!(done&&done.id===L.id);
+  $("#done-msg").textContent="✓ Збережено в щоденник";
+  $("#save-done").textContent=done&&done.id===L.id?"Оновити запис":"Зберегти в щоденник";
+  renderStreak();
+}
+function renderHearts(){
+  const h=$("#hearts");h.innerHTML="";
+  for(let i=1;i<=5;i++){const b=document.createElement("button");b.textContent="♥";b.className=i<=state.rating?"on":"";b.setAttribute("aria-label",i+" з 5");b.onclick=()=>{state.rating=i;renderHearts()};h.appendChild(b)}
+}
+$("#save-done").onclick=()=>{
+  const L=currentLook();
+  state.log[TODAY]={id:L.id,rating:state.rating,note:$("#note").value.trim()};
+  save();renderToday();toast("Збережено в щоденник");
+};
+
+function streak(){
+  let n=0;const d=new Date();
+  if(!state.log[dayKey(d)]) d.setDate(d.getDate()-1);
+  while(state.log[dayKey(d)]){n++;d.setDate(d.getDate()-1)}
+  return n;
+}
+function renderStreak(){$("#streak").textContent=streak()}
+
+function miniHTML(L){return `<span class="mini">${L.pal.map(p=>`<i style="background:${p[0]}"></i>`).join("")}</span>`}
+function renderCatalog(){
+  const opts=[["all","Усі"],["fav","♥ Улюблені"],...OCC.slice(1)];
+  chips($("#cat-chips"),opts,state.catFilter,v=>{state.catFilter=v;renderCatalog()});
+  let list=LOOKS;
+  if(state.catFilter==="fav") list=LOOKS.filter(l=>state.favs.includes(l.id));
+  else if(state.catFilter!=="all") list=LOOKS.filter(l=>l.occ.includes(state.catFilter));
+  const el=$("#catalog");
+  if(!list.length){el.innerHTML=`<div class="empty">Тут з'являться улюблені образи. Натисни «♡ Улюблене» на картці образу.</div>`;return}
+  el.innerHTML="";
+  list.forEach(L=>{
+    const b=document.createElement("button");b.className="row";
+    const times=Object.values(state.log).filter(x=>x.id===L.id).length;
+    b.innerHTML=`${miniHTML(L)}<div><h4>${L.name}</h4><small>${L.min} хв · ${L.level}${times?` · зроблено ${times}×`:""}</small></div><div class="side">${state.favs.includes(L.id)?'<span class="h">♥</span>':""}</div>`;
+    b.onclick=()=>{state.pick[TODAY]={id:L.id,manual:true};save();show("today");renderToday();toast("Обрано на сьогодні")};
+    el.appendChild(b);
+  });
+}
+function renderHistory(){
+  const wk=$("#week");wk.innerHTML="";
+  const d=new Date();d.setDate(d.getDate()-6);
+  for(let i=0;i<7;i++){
+    const k=dayKey(d);const div=document.createElement("div");
+    div.className=(state.log[k]?"on ":"")+(k===TODAY?"today":"");
+    div.innerHTML=`${d.toLocaleDateString("uk-UA",{weekday:"short"})}<span>${d.getDate()}</span>`;
+    wk.appendChild(div);d.setDate(d.getDate()+1);
+  }
+  const entries=Object.entries(state.log).sort((a,b)=>b[0].localeCompare(a[0]));
+  const el=$("#history");
+  if(!entries.length){el.innerHTML=`<div class="empty">Щоденник порожній. Зроби образ дня і натисни «Зберегти в щоденник» — тут з'явиться запис з оцінкою й нотаткою.</div>`;return}
+  el.innerHTML=entries.map(([k,e])=>{
+    const L=LOOKS.find(l=>l.id===e.id);if(!L)return"";
+    const dt=new Date(k+"T12:00");
+    return `<div class="row">${miniHTML(L)}<div><h4>${L.name}</h4><small>${dt.toLocaleDateString("uk-UA",{day:"numeric",month:"long"})}</small>${e.note?`<span class="note">${e.note.replace(/[<&>]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]))}</span>`:""}</div><div class="side"><span class="h">${"♥".repeat(e.rating||0)}</span></div></div>`;
+  }).join("");
+}
+
+function show(v){
+  ["today","catalog","history"].forEach(x=>{$("#view-"+x).hidden=x!==v});
+  document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.view===v));
+  if(v==="catalog")renderCatalog();
+  if(v==="history")renderHistory();
+  window.scrollTo(0,0);
+}
+document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>show(b.dataset.view));
+renderToday();
+if("serviceWorker" in navigator && location.protocol==="https:" && document.querySelector('link[rel="manifest"]')){
+  navigator.serviceWorker.register("sw.js").catch(()=>{});
+}
+</script>
