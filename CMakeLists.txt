@@ -7,7 +7,7 @@ if(MSVC)
 endif()
 
 set(IMGUI ${CMAKE_SOURCE_DIR}/third_party/imgui)
-set(CORE src/core.cpp src/tweaks.cpp src/fortnite.cpp)
+set(CORE src/core.cpp src/tweaks.cpp src/fortnite.cpp src/dns.cpp)
 set(CORE_LIBS ws2_32 iphlpapi advapi32 powrprof psapi)
 
 # Графічна версія
@@ -16,7 +16,7 @@ add_executable(KairoBoost WIN32
   ${IMGUI}/imgui.cpp ${IMGUI}/imgui_draw.cpp ${IMGUI}/imgui_tables.cpp ${IMGUI}/imgui_widgets.cpp
   ${IMGUI}/backends/imgui_impl_win32.cpp ${IMGUI}/backends/imgui_impl_dx11.cpp)
 target_include_directories(KairoBoost PRIVATE src ${IMGUI} ${IMGUI}/backends)
-target_link_libraries(KairoBoost d3d11 d3dcompiler dxgi dwmapi gdi32 ${CORE_LIBS})
+target_link_libraries(KairoBoost d3d11 d3dcompiler dxgi dwmapi gdi32 shell32 ${CORE_LIBS})
 
 # Консольна версія
 add_executable(KairoBoost-cli src/console.cpp ${CORE} src/app.rc)

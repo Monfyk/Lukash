@@ -1,5 +1,6 @@
 // KairoBoost — консольна версія (меню + командний рядок)
 #include "core.h"
+#include "dns.h"
 #include "fortnite.h"
 #include "tweaks.h"
 
@@ -100,6 +101,41 @@ static void FortnitePing(int count) {
     Compare(hosts, count);
 }
 
+static void DnsTest() {
+    const auto& ps = dns::Providers();
+    std::vector<std::pair<double, int>> res;
+    printf("  Перевіряю DNS-сервери...\n");
+    for (int i = 0; i < (int)ps.size(); ++i) {
+        dns::Result r = dns::Measure(ps[i].v4[0], 12);
+        res.push_back({r.avg < 0 ? 1e9 : r.avg, i});
+    }
+    std::sort(res.begin(), res.end());
+    int cur = dns::CurrentProvider();
+    for (size_t k = 0; k < res.size(); ++k) {
+        const auto& p = ps[res[k].second];
+        if (res[k].first >= 1e9)
+            printf("  %zu) %-14s %-32s немає відповіді%s\n", k + 1, p.name, p.v4[0], res[k].second == cur ? "  [поточний]" : "");
+        else
+            printf("  %zu) %-14s %-16s %6.0f мс%s\n", k + 1, p.name, p.v4[0], res[k].first,
+                   res[k].second == cur ? "  [поточний]" : "");
+    }
+}
+
+static void DnsMenu() {
+    printf("\n=== DNS ===\n");
+    DnsTest();
+    const auto& ps = dns::Providers();
+    printf("\n  Встановити: ");
+    for (size_t i = 0; i < ps.size(); ++i) printf("%zu=%s  ", i + 1, ps[i].name);
+    std::string c = ReadLine("\n  Номер провайдера, a — автоматично/як було, Enter — назад: ");
+    if (c == "a") {
+        dns::Restore();
+    } else {
+        int n = atoi(c.c_str());
+        if (n > 0 && n <= (int)ps.size()) dns::Apply(ps[n - 1]);
+    }
+}
+
 static void TweaksMenu() {
     for (;;) {
         printf("\n=== Твіки ===\n");
@@ -125,7 +161,7 @@ static void MainMenu() {
         if (!IsElevated()) printf("  [!] Без прав адміністратора твіки не спрацюють.\n");
         PrintTimerStatus();
         printf("  1) Твіки\n  2) Timer Resolution: авто-підбір\n  3) Тест Sleep(1)\n  4) Тест мережі\n"
-               "  5) Пінг до серверів Fortnite\n  6) Очистка ОЗУ\n  7) Режим гри\n  8) Очистити DNS\n  0) Вихід\n");
+               "  5) Пінг до серверів Fortnite\n  6) Очистка ОЗУ\n  7) Режим гри\n  8) Очистити DNS-кеш\n  9) Вибір DNS\n  0) Вихід\n");
         std::string c = ReadLine("> ");
         if (c == "1") {
             TweaksMenu();
@@ -155,6 +191,9 @@ static void MainMenu() {
         } else if (c == "8") {
             FlushDns();
             Pause();
+        } else if (c == "9") {
+            DnsMenu();
+            Pause();
         } else if (c == "0") {
             return;
         }
@@ -168,7 +207,8 @@ static void Usage() {
            "  --ping host[:port] [...] [--count 20]          тест / порівняння серверів\n"
            "  --fortnite-ping                                пінг до регіонів Fortnite\n"
            "  --apply-recommended | --revert-all | --status\n"
-           "  --clean-ram                                    очистити ОЗУ\n");
+           "  --clean-ram                                    очистити ОЗУ\n"
+           "  --dns-test | --dns Cloudflare | --dns-auto     тест / вибір DNS\n");
 }
 
 int main(int argc, char** argv) {
@@ -185,6 +225,8 @@ int main(int argc, char** argv) {
     }
     std::string game;
     bool gameMode = false, cleanRam = false, apply = false, revert = false, status = false, fnPing = false;
+    bool dnsTest = false, dnsAuto = false;
+    std::string dnsSet;
     ULONG res = 0;
     int count = 20;
     std::vector<std::string> pings;
@@ -199,6 +241,9 @@ int main(int argc, char** argv) {
         else if (a == "--revert-all") revert = true;
         else if (a == "--status") status = true;
         else if (a == "--fortnite-ping") fnPing = true;
+        else if (a == "--dns-test") dnsTest = true;
+        else if (a == "--dns-auto") dnsAuto = true;
+        else if (a == "--dns" && i + 1 < argc) dnsSet = argv[++i];
         else if (a == "--count" && i + 1 < argc) count = std::max(1, atoi(argv[++i]));
         else if (a == "--ping") {
             while (i + 1 < argc && argv[i + 1][0] != '-') pings.push_back(argv[++i]);
@@ -215,6 +260,17 @@ int main(int argc, char** argv) {
     }
     if (!pings.empty()) Compare(pings, count);
     if (fnPing) FortnitePing(count);
+    if (dnsTest) DnsTest();
+    if (dnsAuto) dns::Restore();
+    if (!dnsSet.empty()) {
+        bool found = false;
+        for (auto& p : dns::Providers())
+            if (ToLower(p.name) == ToLower(dnsSet)) {
+                dns::Apply(p);
+                found = true;
+            }
+        if (!found) printf("Невідомий DNS-провайдер: %s\n", dnsSet.c_str());
+    }
     if (gameMode) {
         RunGame(game.empty() ? fn::kExe : game, res ? res : 5000, cleanRam);
     } else {

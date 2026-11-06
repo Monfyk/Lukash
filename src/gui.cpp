@@ -2,6 +2,9 @@
 #include "core.h"
 #include "fortnite.h"
 #include "tweaks.h"
+#include "dns.h"
+
+#include <shellapi.h>
 
 #include <d3d11.h>
 
@@ -21,6 +24,51 @@
 #include "imgui_impl_win32.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
+
+// ---------------------------------------------------------------------------
+// Значок у треї
+// ---------------------------------------------------------------------------
+
+static const UINT WM_TRAY = WM_APP + 1;
+static const UINT WM_SHOW_EXISTING = WM_APP + 2;  // повторний запуск програми
+static const UINT ID_TRAY_OPEN = 1001, ID_TRAY_EXIT = 1002;
+static NOTIFYICONDATAW g_tray{};
+static UINT g_taskbarCreated = 0;
+static bool g_reallyQuit = false;
+
+static void TrayAdd(HWND hwnd) {
+    g_tray.cbSize = sizeof(g_tray);
+    g_tray.hWnd = hwnd;
+    g_tray.uID = 1;
+    g_tray.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    g_tray.uCallbackMessage = WM_TRAY;
+    g_tray.hIcon = (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON,
+                                     GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
+    if (!g_tray.hIcon) g_tray.hIcon = LoadIconW(nullptr, (LPCWSTR)IDI_APPLICATION);
+    wcsncpy(g_tray.szTip, L"KairoBoost", ARRAYSIZE(g_tray.szTip) - 1);
+    Shell_NotifyIconW(NIM_ADD, &g_tray);
+}
+
+static void TrayRemove() { Shell_NotifyIconW(NIM_DELETE, &g_tray); }
+
+static void TrayBalloon(const wchar_t* title, const wchar_t* text) {
+    NOTIFYICONDATAW n = g_tray;
+    n.uFlags = NIF_INFO;
+    wcsncpy(n.szInfoTitle, title, ARRAYSIZE(n.szInfoTitle) - 1);
+    wcsncpy(n.szInfo, text, ARRAYSIZE(n.szInfo) - 1);
+    n.dwInfoFlags = NIIF_INFO;
+    Shell_NotifyIconW(NIM_MODIFY, &n);
+}
+
+static void ShowFromTray(HWND hwnd) {
+    ShowWindow(hwnd, SW_SHOW);
+    if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+    SetForegroundWindow(hwnd);
+}
+
+// Сховати вікно: у трей (якщо ввімкнено) або на панель задач
+struct App;
+static void HideWindow(HWND hwnd, bool toTray);
 
 // ---------------------------------------------------------------------------
 // Кольори та шрифти
@@ -123,7 +171,16 @@ struct LiveTarget {
     }
 };
 
-enum Page { PageHome, PageFortnite, PageTweaks, PageTimer, PageRam, PageNet, PageGame, PageInfo, PageCount };
+enum Page { PageHome, PageFortnite, PageTweaks, PageTimer, PageRam, PageNet, PageDns, PageGame, PageInfo, PageCount };
+
+struct DnsRow {
+    int provider = -1;  // -1 = поточний DNS від провайдера
+    std::string name, servers, note;
+    std::string ip;
+    std::vector<float> samples;
+    dns::Result res;
+    bool done = false;
+};
 
 struct TweakState {
     bool on = false;
@@ -196,6 +253,19 @@ struct App {
     std::atomic<bool> ramRequest{false};  // запит на очистку з потоку режиму гри
 
     bool minimizeOnGame = true;  // згортати вікно, коли гра запущена
+    bool closeToTray = true;     // хрестик ховає програму в трей
+    bool trayHintShown = false;
+
+    // DNS
+    std::mutex dnsMutex;
+    std::vector<DnsRow> dnsRows;
+    Task dnsTask;
+    int dnsCurrent = -1;
+    std::string dnsCurrentText;
+    bool dnsChanged = false;
+    double dnsInfoTime = -1e9;
+    bool dnsTested = false;
+    std::atomic<bool> dnsIntercepted{false};
     bool lowPower = false;       // економний режим зараз активний
 };
 
@@ -242,6 +312,8 @@ static void SaveSettings(const App& a) {
     put("RamExclude", ex);
     put("Targets", a.targets);
     put("MinimizeOnGame", a.minimizeOnGame ? "1" : "0");
+    put("CloseToTray", a.closeToTray ? "1" : "0");
+    put("TrayHintShown", a.trayHintShown ? "1" : "0");
 }
 
 static void LoadSettings(App& a) {
@@ -266,6 +338,8 @@ static void LoadSettings(App& a) {
     }
     if ((v = get("Targets")) != "\x01" && !v.empty()) snprintf(a.targets, sizeof(a.targets), "%s", v.c_str());
     if ((v = get("MinimizeOnGame")) != "\x01") a.minimizeOnGame = v == "1";
+    if ((v = get("CloseToTray")) != "\x01") a.closeToTray = v == "1";
+    if ((v = get("TrayHintShown")) != "\x01") a.trayHintShown = v == "1";
 }
 
 // ---------------------------------------------------------------------------
@@ -780,6 +854,11 @@ static void PageHomeUi(App& a) {
     if (ImGui::Button("Fortnite")) snprintf(a.gameExe, sizeof(a.gameExe), "%s", fn::kExe);
     ImGui::EndDisabled();
     if (ImGui::Checkbox("Згортати KairoBoost, коли гра запущена", &a.minimizeOnGame)) SaveSettings(a);
+    ImGui::SameLine(0, S(24));
+    if (ImGui::Checkbox("Хрестик ховає програму в трей", &a.closeToTray)) SaveSettings(a);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Закриття вікна не вимикає KairoBoost — він працює біля годинника.\n"
+                          "Повністю вийти: правою кнопкою по значку в треї → Вихід.");
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Згорнуте вікно не малюється — програма майже не використовує CPU і відеокарту.");
     ImGui::Spacing();
@@ -1246,6 +1325,227 @@ static void PageNetUi(App& a) {
     EndCard();
 }
 
+// ---------------------------------------------------------------------------
+// DNS
+// ---------------------------------------------------------------------------
+
+static void RefreshDnsInfo(App& a, bool force = false) {
+    if (!force && ImGui::GetTime() - a.dnsInfoTime < 3.0) return;
+    a.dnsCurrent = dns::CurrentProvider();
+    auto cur = dns::CurrentServers();
+    a.dnsCurrentText.clear();
+    for (auto& c : cur) a.dnsCurrentText += (a.dnsCurrentText.empty() ? "" : " / ") + c;
+    a.dnsChanged = dns::IsChanged();
+    a.dnsInfoTime = ImGui::GetTime();
+}
+
+static void StartDnsTest(App& a) {
+    if (a.dnsTask.running) return;
+    RefreshDnsInfo(a, true);
+    {
+        std::lock_guard<std::mutex> l(a.dnsMutex);
+        a.dnsRows.clear();
+        const auto& ps = dns::Providers();
+        for (int i = 0; i < (int)ps.size(); ++i) {
+            DnsRow r;
+            r.provider = i;
+            r.name = ps[i].name;
+            r.note = ps[i].note;
+            r.servers = std::string(ps[i].v4[0]) + " / " + ps[i].v4[1];
+            r.ip = ps[i].v4[0];
+            a.dnsRows.push_back(r);
+        }
+        // DNS від провайдера, якщо зараз стоїть не один із відомих
+        auto cur = dns::CurrentServers();
+        if (a.dnsCurrent < 0 && !cur.empty()) {
+            DnsRow r;
+            r.name = "Провайдер / роутер";
+            r.note = "DNS, який зараз видає твоя мережа";
+            r.servers = a.dnsCurrentText;
+            r.ip = cur[0];
+            a.dnsRows.push_back(r);
+        }
+    }
+    a.dnsTested = true;
+    a.dnsTask.Start([&a] {
+        size_t n;
+        std::vector<std::string> ips;
+        {
+            std::lock_guard<std::mutex> l(a.dnsMutex);
+            n = a.dnsRows.size();
+            for (auto& r : a.dnsRows) ips.push_back(r.ip);
+        }
+        lb::Log("Тест DNS: %d серверів", (int)n);
+        a.dnsIntercepted = dns::InterceptionDetected();
+        if (a.dnsIntercepted) lb::Log("[!] DNS-запити перехоплюються мережею — результати тесту недостовірні");
+        std::vector<std::thread> w;
+        for (size_t i = 0; i < n; ++i)
+            w.emplace_back([&a, i, ip = ips[i]] {
+                dns::Result r = dns::Measure(ip, 16, &a.dnsTask.cancel, [&a, i](double ms) {
+                    std::lock_guard<std::mutex> l(a.dnsMutex);
+                    a.dnsRows[i].samples.push_back((float)ms);
+                });
+                std::lock_guard<std::mutex> l(a.dnsMutex);
+                a.dnsRows[i].res = r;
+                a.dnsRows[i].done = true;
+            });
+        for (auto& t : w) t.join();
+        std::lock_guard<std::mutex> l(a.dnsMutex);
+        int best = -1;
+        for (int i = 0; i < (int)a.dnsRows.size(); ++i)
+            if (a.dnsRows[i].res.avg >= 0 && (best < 0 || a.dnsRows[i].res.avg < a.dnsRows[best].res.avg)) best = i;
+        if (best >= 0) lb::Log("Найшвидший DNS: %s (%.0f мс)", a.dnsRows[best].name.c_str(), a.dnsRows[best].res.avg);
+    });
+}
+
+static double RowAvg(const DnsRow& r) {
+    if (r.done) return r.res.avg;
+    // Живе значення під час тесту
+    double sum = 0;
+    int ok = 0;
+    for (float s : r.samples)
+        if (s >= 0) sum += s, ++ok;
+    return ok ? sum / ok : -1;
+}
+
+static void PageDnsUi(App& a) {
+    Title("DNS", "Вибір найшвидшого DNS-сервера. Програма надсилає справжні DNS-запити і міряє час відповіді.");
+    RefreshDnsInfo(a);
+    if (!a.dnsTested && !a.dnsTask.running) StartDnsTest(a);
+
+    BeginCard("dnscur", ImVec2(0, 0));
+    ImGui::TextColored(kMuted, "Зараз:");
+    ImGui::SameLine();
+    const auto& ps = dns::Providers();
+    if (a.dnsCurrent >= 0) {
+        ImGui::PushFont(g_fontBold);
+        ImGui::TextUnformatted(ps[a.dnsCurrent].name);
+        ImGui::PopFont();
+        ImGui::SameLine();
+    }
+    ImGui::TextColored(kMuted, "%s", a.dnsCurrentText.empty() ? "немає активного підключення" : a.dnsCurrentText.c_str());
+    ImGui::Spacing();
+    ImGui::BeginDisabled(a.dnsTask.running);
+    if (AccentButton(a.dnsTask.running ? "Перевіряю..." : "Перевірити ще раз", ImVec2(S(200), S(36)))) StartDnsTest(a);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(a.tweakTask.running);
+    if (ImGui::Button(a.dnsChanged ? "Повернути як було" : "Автоматично (від провайдера)", ImVec2(S(260), S(36))))
+        RunTweakJob(a, "dns", [&a] {
+            dns::Restore();
+            a.dnsInfoTime = -1e9;
+        });
+    ImGui::EndDisabled();
+    HelpText("DNS впливає на швидкість відкриття сайтів, входу в лаунчер і підключення до матчу, але не на пінг "
+             "у самій грі.");
+    EndCard();
+    ImGui::Spacing();
+    if (a.dnsIntercepted) {
+        InfoBox("Твоя мережа перехоплює DNS-запити (так роблять деякі провайдери, роутери або антивіруси): відповідь "
+                "приходить навіть з адреси, де DNS-сервера немає. Через це цифри нижче недостовірні, а зміна DNS у "
+                "Windows може нічого не дати. Перевір налаштування роутера/антивіруса або спитай провайдера.",
+                kWarn);
+        ImGui::Spacing();
+    }
+
+    // Сортування: найшвидші зверху (після завершення тесту)
+    std::lock_guard<std::mutex> l(a.dnsMutex);
+    std::vector<int> order(a.dnsRows.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = (int)i;
+    bool allDone = !a.dnsTask.running;
+    if (allDone)
+        std::stable_sort(order.begin(), order.end(), [&](int x, int y) {
+            double ax = a.dnsRows[x].res.avg, ay = a.dnsRows[y].res.avg;
+            if (ax < 0) return false;
+            if (ay < 0) return true;
+            return ax < ay;
+        });
+    int fastest = -1;
+    for (int i : order)
+        if (RowAvg(a.dnsRows[i]) >= 0 && (fastest < 0 || RowAvg(a.dnsRows[i]) < RowAvg(a.dnsRows[fastest]))) fastest = i;
+    if (a.dnsIntercepted) fastest = -1;  // при перехопленні "найшвидший" був би вигадкою
+
+    BeginCard("dnslist", ImVec2(0, 0));
+    int rank = 0;
+    for (int i : order) {
+        const DnsRow& r = a.dnsRows[i];
+        ++rank;
+        ImGui::PushID(i);
+        if (rank > 1) ImGui::Separator();
+        float rowY = ImGui::GetCursorPosY();
+        // Номер
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float box = S(34);
+        ImGui::GetWindowDrawList()->AddRect(p, ImVec2(p.x + box, p.y + box), ImGui::GetColorU32(ImVec4(1, 1, 1, 0.12f)),
+                                            S(8));
+        char num[8];
+        snprintf(num, sizeof(num), "%d", rank);
+        ImVec2 ts = ImGui::CalcTextSize(num);
+        ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + (box - ts.x) / 2, p.y + (box - ts.y) / 2),
+                                            ImGui::GetColorU32(ImVec4(0.85f, 0.87f, 0.92f, 1)), num);
+        ImGui::Dummy(ImVec2(box, box));
+        ImGui::SameLine(0, S(14));
+        // Назва, адреси, примітка
+        ImGui::BeginGroup();
+        ImGui::PushFont(g_fontBold);
+        ImGui::TextUnformatted(r.name.c_str());
+        ImGui::PopFont();
+        ImGui::SameLine();
+        ImGui::TextColored(kMuted, "%s", r.servers.c_str());
+        bool isCurrent = (r.provider >= 0 && r.provider == a.dnsCurrent) || (r.provider < 0 && a.dnsCurrent < 0);
+        if (isCurrent) {
+            ImGui::SameLine();
+            Pill("поточний", ImVec4(0.85f, 0.87f, 0.92f, 1));
+        }
+        if (i == fastest && allDone) {
+            ImGui::SameLine();
+            Pill("найшвидший", kGood);
+        }
+        ImGui::TextColored(kMuted, "%s", r.note.c_str());
+        ImGui::EndGroup();
+
+        // Відгук і кнопка — праворуч
+        float right = ImGui::GetContentRegionMax().x;
+        ImGui::SameLine(right - S(330));
+        ImGui::SetCursorPosY(rowY + S(6));
+        double avg = RowAvg(r);
+        ImGui::TextColored(kMuted, "Середній відгук");
+        ImGui::SameLine();
+        if (avg >= 0) {
+            ImVec4 c = avg < 20 ? kGood : (avg < 60 ? kWarn : kBad);
+            Dot(c);
+            ImGui::PushFont(g_fontBold);
+            ImGui::Text("%.0f мс", avg);
+            ImGui::PopFont();
+        } else if (r.done) {
+            Dot(kBad);
+            ImGui::TextColored(kBad, "немає відповіді");
+        } else {
+            ImGui::TextColored(kMuted, "...");
+        }
+        if (r.provider >= 0) {
+            ImGui::SameLine(right - S(120));
+            ImGui::SetCursorPosY(rowY);
+            ImGui::BeginDisabled(a.tweakTask.running || isCurrent);
+            bool fast = i == fastest && allDone;
+            int pi = r.provider;
+            bool clicked = fast ? AccentButton(isCurrent ? "Вибрано" : "Найшвидший", ImVec2(S(120), S(36)), kBad)
+                                : ImGui::Button(isCurrent ? "Вибрано" : "Вибрати", ImVec2(S(120), S(36)));
+            if (clicked)
+                RunTweakJob(a, "dns", [&a, pi] {
+                    dns::Apply(dns::Providers()[pi]);
+                    a.dnsInfoTime = -1e9;
+                });
+            ImGui::EndDisabled();
+        }
+        ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), rowY + S(46)));
+        ImGui::PopID();
+    }
+    EndCard();
+    HelpText("Порада: різниця в кілька мілісекунд майже непомітна. Обирай стабільний сервер без втрат; "
+             "AdGuard блокує рекламу, Quad9 і Comodo — шкідливі сайти.");
+}
+
 static void PageGameUi(App& a) {
     Title("Режим гри",
           "Чекає на запуск гри, тримає Timer Resolution, ставить High-пріоритет і вимикає EcoQoS (якщо гра без "
@@ -1366,7 +1666,8 @@ static void DrawUi(App& a) {
     ImGui::Dummy(ImVec2(0, S(14)));
 
     const char* names[PageCount] = {"Головна",     "Fortnite",    "Твіки",     "Timer Resolution",
-                                    "Очистка ОЗУ", "Тест мережі", "Режим гри", "Як це працює"};
+                                    "Очистка ОЗУ", "Тест мережі", "DNS",       "Режим гри",
+                                    "Як це працює"};
     for (int i = 0; i < PageCount; ++i) {
         bool sel = a.page == i;
         ImVec4 acc = i == PageFortnite ? kFortnite : kAccent;
@@ -1415,6 +1716,7 @@ static void DrawUi(App& a) {
         case PageTimer: PageTimerUi(a); break;
         case PageRam: PageRamUi(a); break;
         case PageNet: PageNetUi(a); break;
+        case PageDns: PageDnsUi(a); break;
         case PageGame: PageGameUi(a); break;
         default: PageInfoUi(a); break;
     }
@@ -1603,14 +1905,72 @@ static LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_SYSCOMMAND:
             if ((wp & 0xfff0) == SC_KEYMENU) return 0;
             break;
+        case WM_CLOSE:
+            if (!g_reallyQuit && g_app && g_app->closeToTray) {
+                HideWindow(hwnd, true);
+                if (!g_app->trayHintShown) {
+                    TrayBalloon(L"KairoBoost працює у треї",
+                                L"Буст і таймер продовжують працювати. Вийти: правою кнопкою по значку → Вихід.");
+                    g_app->trayHintShown = true;
+                    SaveSettings(*g_app);
+                }
+                return 0;
+            }
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_SHOW_EXISTING:
+            ShowFromTray(hwnd);
+            return 0;
+        case WM_TRAY:
+            if (LOWORD(lp) == WM_LBUTTONUP || LOWORD(lp) == WM_LBUTTONDBLCLK) {
+                ShowFromTray(hwnd);
+            } else if (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_CONTEXTMENU) {
+                HMENU m = CreatePopupMenu();
+                AppendMenuW(m, MF_STRING, ID_TRAY_OPEN, L"Відкрити KairoBoost");
+                AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+                AppendMenuW(m, MF_STRING, ID_TRAY_EXIT, L"Вихід");
+                SetMenuDefaultItem(m, ID_TRAY_OPEN, FALSE);
+                POINT pt;
+                GetCursorPos(&pt);
+                SetForegroundWindow(hwnd);  // інакше меню не закривається кліком повз нього
+                UINT cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, nullptr);
+                DestroyMenu(m);
+                if (cmd == ID_TRAY_OPEN) ShowFromTray(hwnd);
+                if (cmd == ID_TRAY_EXIT) {
+                    g_reallyQuit = true;
+                    DestroyWindow(hwnd);
+                }
+            }
+            return 0;
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
     }
+    if (g_taskbarCreated && msg == g_taskbarCreated) {  // Провідник перезапустився — повертаємо значок
+        TrayAdd(hwnd);
+        return 0;
+    }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
+static void HideWindow(HWND hwnd, bool toTray) {
+    if (toTray)
+        ShowWindow(hwnd, SW_HIDE);
+    else
+        ShowWindow(hwnd, SW_MINIMIZE);
+}
+
 int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
+    // Лише одна копія: повторний запуск показує вже відкрите вікно (зокрема з трею)
+    HANDLE single = CreateMutexW(nullptr, TRUE, L"KairoBoost_SingleInstance");
+    if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
+        HWND other = FindWindowW(L"KairoBoostWnd", nullptr);
+        if (other) {
+            AllowSetForegroundWindow(ASFW_ANY);
+            PostMessageW(other, WM_SHOW_EXISTING, 0, 0);
+        }
+        return 0;
+    }
     ImGui_ImplWin32_EnableDpiAwareness();
     {
         POINT pt{0, 0};
@@ -1659,6 +2019,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         MessageBoxW(nullptr, L"Не вдалося ініціалізувати DirectX 11", L"KairoBoost", MB_ICONERROR);
         return 1;
     }
+    g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+    TrayAdd(hwnd);
     ShowWindow(hwnd, SW_SHOWDEFAULT);
     UpdateWindow(hwnd);
 
@@ -1680,14 +2042,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     DWORD prevPid = 0;
     int busyFrames = 3;  // кілька кадрів після вводу — щоб анімації ImGui встигли завершитися
     while (!done) {
-        bool minimized = IsIconic(hwnd) != FALSE;
+        bool minimized = IsIconic(hwnd) || !IsWindowVisible(hwnd);
         bool focused = GetForegroundWindow() == hwnd;
         DWORD pid = app.gamePid;
         bool inGame = pid != 0;
 
         // Гра щойно запустилася — згортаємо вікно
         if (inGame && !prevPid && app.minimizeOnGame && !minimized) {
-            ShowWindow(hwnd, SW_MINIMIZE);
+            HideWindow(hwnd, app.closeToTray);
             minimized = true;
         }
         prevPid = pid;
@@ -1717,7 +2079,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
         if (done) break;
         RamScheduler(app);
 
-        if (IsIconic(hwnd)) continue;
+        if (IsIconic(hwnd) || !IsWindowVisible(hwnd)) continue;
         if (g_occluded) {
             if (g_swapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) continue;
             g_occluded = false;
@@ -1750,6 +2112,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     app.timerTask.Join();
     app.tweakTask.Join();
     app.ramTask.Join();
+    app.dnsTask.Join();
     lb::SetLogSink(nullptr);
     lb::Shutdown();
 
@@ -1757,7 +2120,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
     CleanupDevice();
-    DestroyWindow(hwnd);
+    TrayRemove();
+    if (IsWindow(hwnd)) DestroyWindow(hwnd);
     UnregisterClassW(wc.lpszClassName, wc.hInstance);
     return 0;
 }

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "dns.h"
 #include "fortnite.h"
 
 namespace tw {
@@ -472,6 +473,7 @@ void RevertEverything() {
     int r = lb::RestoreAllRegistryBackups();
     int q = lb::QosRemoveAll();
     if (fn::HasSettingsBackup()) fn::RestoreSettingsBackup();
+    if (dns::IsChanged()) dns::Restore();
     lb::Log("Усе відкочено (додатково відновлено значень реєстру: %d, QoS-політик: %d). Перезавантаж ПК.", r, q);
 }
 
