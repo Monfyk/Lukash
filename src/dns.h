@@ -34,6 +34,7 @@ Result Measure(const std::string& server, int count, const std::atomic<bool>* ca
 
 struct Adapter {
     unsigned index = 0;
+    unsigned ifType = 0;  // 6 = Ethernet, 71 = Wi-Fi
     std::string guid, name;
     std::vector<std::string> dns4, dns6;
 };
@@ -47,5 +48,8 @@ bool Apply(const Provider& p);
 // Повертає налаштування DNS, що були до KairoBoost (або автоматичні від провайдера)
 bool Restore();
 bool IsChanged();
+
+// Чи йде інтернет через Wi-Fi (кабель дає менший пінг і джитер)
+bool OnWifi();
 
 }  // namespace dns

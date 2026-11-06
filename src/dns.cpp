@@ -160,6 +160,7 @@ static std::vector<AdapterEx> List() {
         AdapterEx ad;
         ad.index = a->IfIndex;
         ad.index6 = a->Ipv6IfIndex;
+        ad.ifType = a->IfType;
         ad.guid = a->AdapterName;
         ad.name = Utf8(a->FriendlyName);
         for (auto* d = a->FirstDnsServerAddress; d; d = d->Next) {
@@ -277,6 +278,14 @@ bool Restore() {
         }
     }
     lb::FlushDns();
+    return true;
+}
+
+bool OnWifi() {
+    auto list = List();
+    if (list.empty()) return false;
+    for (auto& a : list)
+        if (a.ifType != IF_TYPE_IEEE80211) return false;  // є дротове підключення
     return true;
 }
 

@@ -85,6 +85,12 @@ bool IsRunning() { return lb::FindProcess(kExe) != 0; }
 
 static const char* kSection = "/Script/FortniteGame.FortGameUserSettings";
 static const char* kRhiSection = "D3DRHIPreference";
+static const char* kSgSection = "ScalabilityGroups";
+// Групи якості Unreal Engine, які найбільше впливають на FPS. Дальність огляду і текстури не чіпаємо:
+// дальність важлива для гри, а текстури майже не впливають на FPS (лише на відеопам'ять).
+static const char* kLowSg[] = {"sg.ShadowQuality",      "sg.GlobalIlluminationQuality", "sg.ReflectionQuality",
+                               "sg.PostProcessQuality", "sg.EffectsQuality",            "sg.FoliageQuality",
+                               "sg.ShadingQuality",     "sg.AntiAliasingQuality"};
 
 std::string SettingsPath() {
     std::string la = lb::GetEnv("LOCALAPPDATA");
@@ -107,12 +113,17 @@ Settings ReadSettings() {
     s.vsync = lb::ToLower(IniGet(f, kSection, "bUseVSync")) == "true";
     s.rhi = lb::ToLower(IniGet(f, kRhiSection, "PreferredRHI"));
     s.performanceMode = lb::ToLower(IniGet(f, kRhiSection, "PreferredFeatureLevel")) == "es31";
+    std::string fm = IniGet(f, kSection, "FullscreenMode");
+    s.fullscreen = fm == "0";
+    s.lowGraphics = true;
+    for (const char* k : kLowSg)
+        if (IniGet(f, kSgSection, k) != "0") s.lowGraphics = false;
     return s;
 }
 
 bool HasSettingsBackup() { return lb::FileExists(SettingsPath() + ".kairo-backup"); }
 
-bool WriteSettings(int fpsLimit, bool vsync, bool performanceMode) {
+bool WriteSettings(int fpsLimit, bool vsync, bool performanceMode, bool fullscreen, bool lowGraphics) {
     std::string f = SettingsPath();
     if (f.empty() || !lb::FileExists(f)) {
         lb::Log("[!] Не знайдено GameUserSettings.ini — запусти Fortnite хоча б раз");
@@ -140,10 +151,18 @@ bool WriteSettings(int fpsLimit, bool vsync, bool performanceMode) {
         // Вимикаємо режим продуктивності -> звичайний DirectX 11
         ok = ok && WritePrivateProfileStringA(kRhiSection, "PreferredFeatureLevel", "sm5", f.c_str());
     }
+    if (fullscreen) {
+        // 0 = повноекранний, 1 = вікно без рамки, 2 = вікно
+        for (const char* k : {"FullscreenMode", "LastConfirmedFullscreenMode", "PreferredFullscreenMode"})
+            ok = ok && WritePrivateProfileStringA(kSection, k, "0", f.c_str());
+    }
+    if (lowGraphics)
+        for (const char* k : kLowSg) ok = ok && WritePrivateProfileStringA(kSgSection, k, "0", f.c_str());
     if (attr & FILE_ATTRIBUTE_READONLY) SetFileAttributesA(f.c_str(), attr);
-    lb::Log("[%s] Налаштування Fortnite: FPS %s, VSync %s, режим продуктивності %s", ok ? "OK" : "ПОМИЛКА",
+    lb::Log("[%s] Налаштування Fortnite: FPS %s, VSync %s, режим продуктивності %s%s%s", ok ? "OK" : "ПОМИЛКА",
             fpsLimit ? std::to_string(fpsLimit).c_str() : "без обмеження", vsync ? "увімк" : "вимк",
-            performanceMode ? "увімк" : "вимк");
+            performanceMode ? "увімк" : "вимк", fullscreen ? ", повноекранний режим" : "",
+            lowGraphics ? ", мінімальна графіка" : "");
     return ok;
 }
 

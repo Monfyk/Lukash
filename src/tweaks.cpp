@@ -3,6 +3,7 @@
 #include <powrprof.h>
 #include <powersetting.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -71,6 +72,110 @@ static std::vector<RegValue> NetPowerRegs() {
             if (lb::RegValueExists(LM, p, name)) v.push_back(Sz(LM, p, name, "0"));
     }
     return v;
+}
+
+// Модерація переривань: адаптер збирає пакети пачками, щоб менше навантажувати CPU — ціною затримки
+static std::vector<RegValue> NetIrqRegs() {
+    std::vector<RegValue> v;
+    for (auto& sub : lb::RegSubKeys(LM, kNetClass)) {
+        if (sub.size() != 4 || sub[0] < '0' || sub[0] > '9') continue;
+        std::string p = std::string(kNetClass) + "\\" + sub;
+        DWORD ch = 0;
+        if (!lb::RegGetDword(LM, p, "Characteristics", ch) || !(ch & 0x4)) continue;
+        if (lb::RegValueExists(LM, p, "*InterruptModeration")) v.push_back(Sz(LM, p, "*InterruptModeration", "0"));
+    }
+    return v;
+}
+
+// Windows 11: "Оптимізації для віконних ігор" — DX10/11 у вікні без рамки отримують сучасний
+// flip-режим виводу (менша затримка, підтримка VRR), як у повноекранному режимі.
+static const char* kDxUser = "Software\\Microsoft\\DirectX\\UserGpuPreferences";
+static const char* kDxGlobal = "DirectXUserGlobalSettings";
+
+static std::vector<RegValue> WinOptRegs() {
+    std::string cur;
+    lb::RegGetString(CU, kDxUser, kDxGlobal, cur);
+    // Зберігаємо інші параметри в рядку, міняємо лише SwapEffectUpgradeEnable
+    std::string out;
+    size_t pos = 0;
+    while (pos < cur.size()) {
+        size_t end = cur.find(';', pos);
+        std::string item = cur.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+        if (!item.empty() && item.rfind("SwapEffectUpgradeEnable=", 0) != 0) out += item + ";";
+        if (end == std::string::npos) break;
+        pos = end + 1;
+    }
+    out += "SwapEffectUpgradeEnable=1;";
+    return {Sz(CU, kDxUser, kDxGlobal, out)};
+}
+
+static bool WinOptOn() {
+    std::string cur;
+    return lb::RegGetString(CU, kDxUser, kDxGlobal, cur) && cur.find("SwapEffectUpgradeEnable=1;") != std::string::npos;
+}
+
+// ---------------------------------------------------------------------------
+// Частота оновлення монітора (основний дисплей)
+// ---------------------------------------------------------------------------
+
+static bool DisplayModes(DEVMODEA& cur, DEVMODEA& best, int& distinct) {
+    cur = {};
+    cur.dmSize = sizeof(cur);
+    if (!EnumDisplaySettingsA(nullptr, ENUM_CURRENT_SETTINGS, &cur)) return false;
+    best = cur;
+    std::vector<DWORD> freqs;
+    DEVMODEA m{};
+    m.dmSize = sizeof(m);
+    for (DWORD i = 0; EnumDisplaySettingsA(nullptr, i, &m); ++i) {
+        if (m.dmPelsWidth != cur.dmPelsWidth || m.dmPelsHeight != cur.dmPelsHeight || m.dmBitsPerPel != cur.dmBitsPerPel)
+            continue;
+        if (std::find(freqs.begin(), freqs.end(), m.dmDisplayFrequency) == freqs.end()) freqs.push_back(m.dmDisplayFrequency);
+        if (m.dmDisplayFrequency > best.dmDisplayFrequency) best = m;
+    }
+    distinct = (int)freqs.size();
+    return true;
+}
+
+static bool SetRefresh(DWORD hz) {
+    DEVMODEA cur, best;
+    int n;
+    if (!DisplayModes(cur, best, n)) return false;
+    DEVMODEA m = cur;
+    m.dmDisplayFrequency = hz;
+    m.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY;
+    return ChangeDisplaySettingsA(&m, CDS_UPDATEREGISTRY) == DISP_CHANGE_SUCCESSFUL;
+}
+
+static bool RefreshOn() {
+    DEVMODEA cur, best;
+    int n;
+    return DisplayModes(cur, best, n) && n > 1 && cur.dmDisplayFrequency >= best.dmDisplayFrequency;
+}
+
+static bool RefreshApply() {
+    DEVMODEA cur, best;
+    int n;
+    if (!DisplayModes(cur, best, n)) return false;
+    lb::StateSave("hz", std::to_string(cur.dmDisplayFrequency));
+    bool ok = SetRefresh(best.dmDisplayFrequency);
+    if (ok) lb::Log("Частота монітора: %lu Гц -> %lu Гц", cur.dmDisplayFrequency, best.dmDisplayFrequency);
+    return ok;
+}
+
+static bool RefreshRevert() {
+    std::string v;
+    if (!lb::StateLoad("hz", v)) return false;
+    bool ok = SetRefresh((DWORD)atoi(v.c_str()));
+    lb::StateDelete("hz");
+    return ok;
+}
+
+static std::string RefreshUnavailable() {
+    DEVMODEA cur, best;
+    int n;
+    if (!DisplayModes(cur, best, n)) return "Не вдалося прочитати режими монітора";
+    if (n <= 1) return "Монітор підтримує лише " + std::to_string(cur.dmDisplayFrequency) + " Гц";
+    return "";
 }
 
 static std::vector<RegValue> FortniteExeRegs(const char* subkey, const std::string& value) {
@@ -275,8 +380,9 @@ const std::vector<Tweak>& All() {
 
         // ---- Мережа ----
         add({"nagle", Network, "Вимкнути алгоритм Нейгла",
-             "TCP-пакети відправляються одразу, без накопичення та затримки підтвердження.",
-             "Майже ніколи не шкодить. Fortnite грає по UDP, тому ефект — у лобі, чаті й лаунчері.", true, true,
+             "TCP-пакети відправляються одразу. Діє на лаунчер, лобі й чат; ігровий трафік Fortnite іде по UDP, "
+             "тож на пінг у матчі не впливає.",
+             "Майже ніколи не шкодить.", true, true,
              NagleRegs});
         add({"throttle", Network, "Без обмеження мережевих пакетів",
              "NetworkThrottlingIndex: Windows не обмежує обробку пакетів, поки грає музика чи відео.",
@@ -288,7 +394,8 @@ const std::vector<Tweak>& All() {
 
         // ---- Система ----
         add({"mmcss", System, "Максимальний пріоритет для ігор",
-             "Планувальник Windows (MMCSS) дає ігровим потокам вищий пріоритет процесора і відеокарти.",
+             "Планувальник Windows (MMCSS) дає вищий пріоритет потокам, що ним користуються: звук, частина ігор і "
+             "відео. Зменшує ризик фризів звуку і кадрів під навантаженням.",
              "Немає суттєвих мінусів.", true, true, [] {
                  return std::vector<RegValue>{Dw(LM, kGamesTask, "GPU Priority", 8), Dw(LM, kGamesTask, "Priority", 6),
                                               Sz(LM, kGamesTask, "Scheduling Category", "High"),
@@ -352,6 +459,22 @@ const std::vector<Tweak>& All() {
              "Ноутбуки: вище температура і споживання.", false, false, nullptr, CoresOn, CoresApply, CoresRevert});
 
         // ---- Відеокарта ----
+        add({"refresh", Gpu, "Максимальна частота монітора",
+             "Windows часто лишає 60 Гц навіть на моніторі 144/240 Гц — тоді ти бачиш лише 60 кадрів. Ставить "
+             "найвищу частоту, яку підтримує монітор.",
+             "Якщо монітор блимає або гасне на високій частоті (поганий кабель) — вимкни, повернеться як було.",
+             false, true, nullptr, RefreshOn, RefreshApply, RefreshRevert, nullptr, RefreshUnavailable});
+        add({"netirq", Network, "Без затримки переривань мережі",
+             "Мережева карта передає кожен пакет одразу, а не пачками: трохи менші затримка і джитер.",
+             "Слабкий процесор і дуже швидкий інтернет (1 Гбіт/с і більше) — трохи вище навантаження на CPU.", true,
+             false, NetIrqRegs, nullptr, nullptr, nullptr, nullptr,
+             [] { return NetIrqRegs().empty() ? std::string("Мережева карта не має цього параметра") : std::string(); }});
+        add({"winopt", Gpu, "Оптимізації для віконних ігор",
+             "Windows 11: гра у «вікні без рамки» виводить кадри як у повноекранному режимі — менша затримка "
+             "і підтримка G-Sync/FreeSync.",
+             "Рідко — конфлікти зі старими оверлеями. Якщо гра почне блимати, вимкни.", false, true, WinOptRegs,
+             WinOptOn, nullptr, nullptr, nullptr,
+             [] { return lb::WindowsBuild() >= 22621 ? std::string() : std::string("Потрібна Windows 11 22H2+"); }});
         add({"hags", Gpu, "Апаратне планування GPU",
              "Відеокарта сама керує своєю чергою кадрів — менша затримка і навантаження на CPU.",
              "Старі драйвери або відеокарти до GTX 1000 / RX 5000 — можуть бути фризи.", true, false,
@@ -423,7 +546,7 @@ const std::vector<Tweak>& All() {
              [] { return lb::QosRemove(fn::kExe); }});
         // Ці твіки підхоплюються при наступному запуску гри
         for (auto& t : v)
-            for (const char* id : {"gamedvr", "fso", "fn_priority", "fn_gpu", "fn_fso", "fn_qos"})
+            for (const char* id : {"gamedvr", "fso", "winopt", "fn_priority", "fn_gpu", "fn_fso", "fn_qos"})
                 if (std::string(t.id) == id) t.gameRestart = true;
         return v;
     }();

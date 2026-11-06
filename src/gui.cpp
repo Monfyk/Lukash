@@ -224,9 +224,10 @@ struct App {
     char fnDir[MAX_PATH] = "";
     std::string fnExe;
     bool fnRunning = false;
+    bool onWifi = false;
     fn::Settings fnSettings;
     int fnFpsIdx = 0;
-    bool fnVsync = false, fnPerf = false;
+    bool fnVsync = false, fnPerf = false, fnFullscreen = false, fnLowGfx = false;
     bool fnUiLoaded = false;
     double fnTime = -1e9;
 
@@ -640,7 +641,7 @@ static void TweakCard(App& a, size_t idx, float width) {
     bool unavailable = !st.unavailable.empty();
 
     ImGui::PushID(t.id);
-    BeginCard(t.id, ImVec2(width, S(200)));
+    BeginCard(t.id, ImVec2(width, S(215)));
     if (unavailable) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.55f);
 
     Pill(t.category == tw::Input ? "Ввід" : tw::CategoryName(t.category), CategoryColor(t.category));
@@ -911,13 +912,21 @@ static void PageHomeUi(App& a) {
 
 static void PageFortniteUi(App& a) {
     Title("Fortnite", "Налаштування Windows і самої гри саме під Fortnite.");
+    if (a.onWifi) {
+        InfoBox("Ти граєш через Wi-Fi. Найбільший виграш у пінгу, джитері та втратах дає кабель (Ethernet): "
+                "Wi-Fi додає кілька-десятки мілісекунд і стрибки пінгу, які не прибере жодна програма.", kWarn);
+        ImGui::Spacing();
+    }
     if (ImGui::GetTime() - a.fnTime > (a.lowPower ? 30.0 : 2.0)) {
         a.fnExe = fn::ExePath();
         a.fnRunning = fn::IsRunning();
+        a.onWifi = dns::OnWifi();
         a.fnSettings = fn::ReadSettings();
         if (!a.fnUiLoaded && a.fnSettings.found) {
             a.fnVsync = a.fnSettings.vsync;
             a.fnPerf = a.fnSettings.performanceMode;
+            a.fnFullscreen = a.fnSettings.fullscreen;
+            a.fnLowGfx = a.fnSettings.lowGraphics;
             a.fnFpsIdx = 0;
             for (int i = 0; i < 7; ++i)
                 if (kFpsOptions[i] == a.fnSettings.fpsLimit) a.fnFpsIdx = i;
@@ -976,12 +985,26 @@ static void PageFortniteUi(App& a) {
         ImGui::Checkbox("Вертикальна синхронізація (VSync)", &a.fnVsync);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Вимкни для мінімальної затримки вводу.");
         ImGui::Checkbox("Режим продуктивності (Performance Mode)", &a.fnPerf);
-        HelpText("Режим продуктивності — простіша графіка, але набагато вищий і стабільніший FPS на слабких ПК. "
-                 "Порада: обмеж FPS на рівні частоти монітора або трохи вище — так менше стрибків кадру.");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Найбільший приріст FPS, особливо на слабких ПК і в будівництві.");
+        ImGui::Checkbox("Повноекранний режим (найменша затримка вводу)", &a.fnFullscreen);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("«Вікно без рамки» додає затримку через композитор Windows. Повноекранний режим — ні.");
+        ImGui::Checkbox("Мінімальна графіка: тіні, ефекти, постобробка, згладжування", &a.fnLowGfx);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Дальність огляду і текстури не змінюються — вони важливі для гри і майже не впливають на FPS.");
+        HelpText("Для максимального FPS і мінімальної затримки: режим продуктивності, повноекранний режим, VSync "
+                 "вимкнено, мінімальна графіка, FPS — без обмеження або трохи вище частоти монітора.");
+        if (ImGui::Button("Обрати все для макс. FPS", ImVec2(S(240), S(32)))) {
+            a.fnVsync = false;
+            a.fnPerf = true;
+            a.fnFullscreen = true;
+            a.fnLowGfx = true;
+            a.fnFpsIdx = 0;
+        }
         if (AccentButton("Записати налаштування", ImVec2(S(240), S(38)))) {
             int fps = kFpsOptions[a.fnFpsIdx];
-            bool vs = a.fnVsync, perf = a.fnPerf;
-            RunTweakJob(a, "fn_settings", [fps, vs, perf] { fn::WriteSettings(fps, vs, perf); });
+            bool vs = a.fnVsync, perf = a.fnPerf, full = a.fnFullscreen, low = a.fnLowGfx;
+            RunTweakJob(a, "fn_settings", [fps, vs, perf, full, low] { fn::WriteSettings(fps, vs, perf, full, low); });
             a.fnTime = -1e9;
         }
         ImGui::SameLine();
@@ -1040,6 +1063,27 @@ static void PageFortniteUi(App& a) {
         a.page = PageHome;
     }
     HelpText("Логи і звіти про збої з часом займають місце; гра створить нові за потреби.");
+    EndCard();
+
+    // --- Що ще зробити ---
+    ImGui::Spacing();
+    BeginCard("fntips", ImVec2(0, 0));
+    SectionTitle("Що ще дає найбільший ефект");
+    HelpText("Цього програма змінити не може — тільки ти в грі або в налаштуваннях заліза:");
+    const char* tips[] = {
+        "У грі: Відео → NVIDIA Reflex Low Latency → «Увімк. + прискорення» (на картах NVIDIA) — мінус 10-30 мс "
+        "затримки вводу.",
+        "У грі: Відео → Режим відображення — «Повноекранний» (або «Вікно без рамки» з твіком «Оптимізації для "
+        "віконних ігор»).",
+        "Кабель замість Wi-Fi — найбільший виграш у пінгу і стабільності.",
+        "Миша: частота опитування 1000 Гц або вище (у програмі виробника миші).",
+        "Драйвер відеокарти — останньої версії; у панелі NVIDIA/AMD: режим живлення «Максимальна продуктивність».",
+        "Регіон підбору гравців — з найменшим пінгом (кнопка «Перевірити регіони» вище).",
+    };
+    for (auto* t : tips) {
+        Dot(kAccent2);
+        ImGui::TextWrapped("%s", t);
+    }
     EndCard();
 }
 
