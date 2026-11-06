@@ -3,6 +3,7 @@
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include <icmpapi.h>
+#include <psapi.h>
 #include <tlhelp32.h>
 
 #include <algorithm>
@@ -14,15 +15,15 @@
 
 namespace lb {
 
-static const char* kBackupKey = "SOFTWARE\\LukashBoost\\Backup";
+const char* kAppName = "KairoBoost";
+const char* kAppRegRoot = "SOFTWARE\\KairoBoost";
+static const char* kBackupKey = "SOFTWARE\\KairoBoost\\Backup";
+static const char* kStateKey = "SOFTWARE\\KairoBoost\\State";
+static const char* kLegacyBackupKey = "SOFTWARE\\LukashBoost\\Backup";  // попередня назва програми
 static const char* kQosRoot = "SOFTWARE\\Policies\\Microsoft\\Windows\\QoS";
-static const char* kQosPrefix = "LukashBoost_";
-static const char* kTcpIfaces = "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces";
+static const char* kQosPrefix = "KairoBoost_";
+static const char* kLegacyQosPrefix = "LukashBoost_";
 static const char* kTcpQos = "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\QoS";
-static const char* kSysProfile = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile";
-static const char* kGamesTask =
-    "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Multimedia\\SystemProfile\\Tasks\\Games";
-static const char* kKernel = "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\kernel";
 
 // ---------------------------------------------------------------------------
 // Лог
@@ -103,8 +104,18 @@ std::vector<std::string> Split(const std::string& s) {
     return out;
 }
 
-// Запуск консольної команди без миготіння вікна
-static void RunHidden(const char* cmdline) {
+std::string GetEnv(const char* name) {
+    char buf[MAX_PATH * 2];
+    DWORD n = GetEnvironmentVariableA(name, buf, sizeof(buf));
+    return (n && n < sizeof(buf)) ? std::string(buf, n) : std::string();
+}
+
+bool FileExists(const std::string& path) {
+    DWORD a = GetFileAttributesA(path.c_str());
+    return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+void RunHidden(const char* cmdline) {
     STARTUPINFOA si{};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi{};
@@ -114,6 +125,45 @@ static void RunHidden(const char* cmdline) {
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);
     }
+}
+
+std::string RunCapture(const char* cmdline) {
+    SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+    HANDLE rd = nullptr, wr = nullptr;
+    if (!CreatePipe(&rd, &wr, &sa, 0)) return "";
+    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = wr;
+    si.hStdError = wr;
+    PROCESS_INFORMATION pi{};
+    std::string cmd = cmdline, out;
+    bool ok = CreateProcessA(nullptr, &cmd[0], nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    CloseHandle(wr);
+    if (ok) {
+        char buf[1024];
+        DWORD n;
+        while (ReadFile(rd, buf, sizeof(buf), &n, nullptr) && n) out.append(buf, n);
+        WaitForSingleObject(pi.hProcess, 30000);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    CloseHandle(rd);
+    return out;
+}
+
+static bool EnablePrivilege(const char* name) {
+    HANDLE token;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token)) return false;
+    TOKEN_PRIVILEGES tp{};
+    tp.PrivilegeCount = 1;
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    bool ok = LookupPrivilegeValueA(nullptr, name, &tp.Privileges[0].Luid) &&
+              AdjustTokenPrivileges(token, FALSE, &tp, sizeof(tp), nullptr, nullptr) &&
+              GetLastError() == ERROR_SUCCESS;
+    CloseHandle(token);
+    return ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,8 +192,8 @@ static bool DisablePowerThrottling(HANDLE process, ULONG mask) {
     if (!fn) return false;
     PROCESS_POWER_THROTTLING_STATE st{};
     st.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
-    st.ControlMask = mask;  // беремо ці прапорці під контроль...
-    st.StateMask = 0;       // ...і вимикаємо їх
+    st.ControlMask = mask;
+    st.StateMask = 0;
     const int ProcessPowerThrottling = 4;
     return fn(process, ProcessPowerThrottling, &st, sizeof(st)) != FALSE;
 }
@@ -165,9 +215,25 @@ bool Init() {
     HMODULE nt = GetModuleHandleA("ntdll.dll");
     g_query = (NtQueryTimerResolution_t)(void*)GetProcAddress(nt, "NtQueryTimerResolution");
     g_set = (NtSetTimerResolution_t)(void*)GetProcAddress(nt, "NtSetTimerResolution");
-    // Windows 11 ігнорує запит роздільності від згорнутих/невидимих процесів — вимикаємо це для себе.
+    // Windows 11 ігнорує запит роздільності від згорнутих процесів — вимикаємо це для себе.
     DisablePowerThrottling(GetCurrentProcess(), PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION);
     return g_query && g_set;
+}
+
+void SetSelfLowPower(bool on) {
+    HANDLE self = GetCurrentProcess();
+    SetPriorityClass(self, on ? BELOW_NORMAL_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS);
+    typedef BOOL(WINAPI * SetProcessInformation_t)(HANDLE, int, LPVOID, DWORD);
+    auto fn = (SetProcessInformation_t)(void*)GetProcAddress(GetModuleHandleA("kernel32.dll"), "SetProcessInformation");
+    if (fn) {
+        PROCESS_POWER_THROTTLING_STATE st{};
+        st.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        // EcoQoS вмикаємо/вимикаємо, а "ігнорувати Timer Resolution" — завжди вимкнено
+        st.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+        st.StateMask = on ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0;
+        fn(self, 4 /*ProcessPowerThrottling*/, &st, sizeof(st));
+    }
+    if (on) EmptyWorkingSet(self);  // віддати системі пам'ять, яку займає інтерфейс
 }
 
 void Shutdown() {
@@ -245,27 +311,41 @@ ULONG AutoTuneResolution(const std::atomic<bool>* cancel) {
             best = v;
         }
     }
-    ULONG actual = 0;
-    TimerHold(best, &actual);
+    TimerHold(best);
     Log("Найкраще значення: %.4f мс (утримується)", best / 10000.0);
     return best;
 }
+
+bool GlobalTimerSupported() { return WindowsBuild() >= 20348; }
 
 // ---------------------------------------------------------------------------
 // Реєстр з резервною копією
 // ---------------------------------------------------------------------------
 
-static const char* RootName(HKEY root) { return root == HKEY_LOCAL_MACHINE ? "HKLM" : "HKCU"; }
+RegValue Dw(HKEY root, const std::string& path, const std::string& name, DWORD v) {
+    RegValue r{root, path, name, REG_DWORD};
+    r.dw = v;
+    return r;
+}
 
-// Перед першою зміною значення зберігаємо оригінал (або позначку "не існувало").
+RegValue Sz(HKEY root, const std::string& path, const std::string& name, const std::string& v) {
+    RegValue r{root, path, name, REG_SZ};
+    r.sz = v;
+    return r;
+}
+
+static std::string BackupId(HKEY root, const std::string& path, const std::string& name) {
+    return std::string(root == HKEY_LOCAL_MACHINE ? "HKLM" : "HKCU") + "|" + path + "|" + name;
+}
+
 static void BackupValue(HKEY root, const std::string& path, const std::string& name) {
     HKEY bk;
     if (RegCreateKeyExA(HKEY_LOCAL_MACHINE, kBackupKey, 0, nullptr, 0, KEY_READ | KEY_WRITE, nullptr, &bk,
                         nullptr) != ERROR_SUCCESS)
         return;
-    std::string id = std::string(RootName(root)) + "|" + path + "|" + name;
+    std::string id = BackupId(root, path, name);
     if (RegQueryValueExA(bk, id.c_str(), nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS) {
-        RegCloseKey(bk);  // оригінал уже збережено — не перезаписуємо
+        RegCloseKey(bk);  // оригінал уже збережено
         return;
     }
     std::vector<BYTE> blob(4, 0);
@@ -289,35 +369,41 @@ static void BackupValue(HKEY root, const std::string& path, const std::string& n
     RegCloseKey(bk);
 }
 
-static bool SetDword(HKEY root, const std::string& path, const std::string& name, DWORD v, bool backup = true) {
-    if (backup) BackupValue(root, path, name);
+// Записує збережене значення назад (blob = 4 байти типу + дані)
+static void WriteBackBlob(HKEY root, const std::string& path, const std::string& name, const std::vector<BYTE>& blob) {
+    if (blob.size() < 4) return;
+    DWORD type;
+    memcpy(&type, blob.data(), 4);
     HKEY k;
-    if (RegCreateKeyExA(root, path.c_str(), 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS)
-        return false;
-    bool ok = RegSetValueExA(k, name.c_str(), 0, REG_DWORD, (const BYTE*)&v, sizeof(v)) == ERROR_SUCCESS;
+    if (RegOpenKeyExA(root, path.c_str(), 0, KEY_WRITE, &k) != ERROR_SUCCESS) return;
+    if (type == 0xFFFFFFFF)
+        RegDeleteValueA(k, name.c_str());
+    else
+        RegSetValueExA(k, name.c_str(), 0, type, blob.data() + 4, (DWORD)blob.size() - 4);
     RegCloseKey(k);
-    return ok;
 }
 
-static bool SetString(HKEY root, const std::string& path, const std::string& name, const std::string& v,
-                      bool backup = true) {
-    if (backup) BackupValue(root, path, name);
+bool RegApply(const RegValue& v, bool backup) {
+    if (backup) BackupValue(v.root, v.path, v.name);
     HKEY k;
-    if (RegCreateKeyExA(root, path.c_str(), 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS)
+    if (RegCreateKeyExA(v.root, v.path.c_str(), 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS)
         return false;
-    bool ok = RegSetValueExA(k, name.c_str(), 0, REG_SZ, (const BYTE*)v.c_str(), (DWORD)v.size() + 1) ==
-              ERROR_SUCCESS;
+    LONG r;
+    if (v.type == REG_DWORD)
+        r = RegSetValueExA(k, v.name.c_str(), 0, REG_DWORD, (const BYTE*)&v.dw, sizeof(v.dw));
+    else
+        r = RegSetValueExA(k, v.name.c_str(), 0, REG_SZ, (const BYTE*)v.sz.c_str(), (DWORD)v.sz.size() + 1);
     RegCloseKey(k);
-    return ok;
+    return r == ERROR_SUCCESS;
 }
 
-static bool GetDword(HKEY root, const std::string& path, const std::string& name, DWORD& out) {
+bool RegGetDword(HKEY root, const std::string& path, const std::string& name, DWORD& out) {
     DWORD sz = sizeof(out);
     return RegGetValueA(root, path.c_str(), name.c_str(), RRF_RT_REG_DWORD, nullptr, &out, &sz) == ERROR_SUCCESS;
 }
 
-static bool GetString(HKEY root, const std::string& path, const std::string& name, std::string& out) {
-    char buf[512];
+bool RegGetString(HKEY root, const std::string& path, const std::string& name, std::string& out) {
+    char buf[1024];
     DWORD sz = sizeof(buf);
     if (RegGetValueA(root, path.c_str(), name.c_str(), RRF_RT_REG_SZ, nullptr, buf, &sz) != ERROR_SUCCESS)
         return false;
@@ -325,7 +411,39 @@ static bool GetString(HKEY root, const std::string& path, const std::string& nam
     return true;
 }
 
-static std::vector<std::string> SubKeys(HKEY root, const std::string& path) {
+bool RegValueExists(HKEY root, const std::string& path, const std::string& name) {
+    return RegGetValueA(root, path.c_str(), name.c_str(), RRF_RT_ANY, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+}
+
+bool RegIsSet(const RegValue& v) {
+    if (v.type == REG_DWORD) {
+        DWORD cur;
+        return RegGetDword(v.root, v.path, v.name, cur) && cur == v.dw;
+    }
+    std::string cur;
+    return RegGetString(v.root, v.path, v.name, cur) && cur == v.sz;
+}
+
+bool RegRestore(const RegValue& v) {
+    HKEY bk;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, kBackupKey, 0, KEY_READ | KEY_WRITE, &bk) != ERROR_SUCCESS) return false;
+    bool found = false;
+    std::string id = BackupId(v.root, v.path, v.name);
+    DWORD sz = 0;
+    if (RegQueryValueExA(bk, id.c_str(), nullptr, nullptr, nullptr, &sz) == ERROR_SUCCESS) {
+        std::vector<BYTE> blob(sz);
+        if (RegQueryValueExA(bk, id.c_str(), nullptr, nullptr, blob.data(), &sz) == ERROR_SUCCESS) {
+            blob.resize(sz);
+            WriteBackBlob(v.root, v.path, v.name, blob);
+            found = true;
+        }
+        RegDeleteValueA(bk, id.c_str());
+    }
+    RegCloseKey(bk);
+    return found;
+}
+
+std::vector<std::string> RegSubKeys(HKEY root, const std::string& path) {
     std::vector<std::string> out;
     HKEY k;
     if (RegOpenKeyExA(root, path.c_str(), 0, KEY_READ, &k) != ERROR_SUCCESS) return out;
@@ -339,9 +457,9 @@ static std::vector<std::string> SubKeys(HKEY root, const std::string& path) {
     return out;
 }
 
-static int RestoreBackup() {
+static int RestoreBackupKey(const char* key) {
     HKEY bk;
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, kBackupKey, 0, KEY_READ, &bk) != ERROR_SUCCESS) return 0;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, key, 0, KEY_READ, &bk) != ERROR_SUCCESS) return 0;
     std::vector<std::pair<std::string, std::vector<BYTE>>> items;
     for (DWORD i = 0;; ++i) {
         char name[2048];
@@ -354,156 +472,152 @@ static int RestoreBackup() {
         items.emplace_back(name, data);
     }
     RegCloseKey(bk);
-
     int restored = 0;
     for (auto& it : items) {
         const std::string& id = it.first;
         size_t p1 = id.find('|'), p2 = id.rfind('|');
-        if (p1 == std::string::npos || p2 == p1 || it.second.size() < 4) continue;
+        if (p1 == std::string::npos || p2 == p1) continue;
         HKEY root = id.substr(0, p1) == "HKLM" ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
-        std::string path = id.substr(p1 + 1, p2 - p1 - 1);
-        std::string name = id.substr(p2 + 1);
-        DWORD type;
-        memcpy(&type, it.second.data(), 4);
-        HKEY k;
-        if (RegOpenKeyExA(root, path.c_str(), 0, KEY_WRITE, &k) != ERROR_SUCCESS) continue;
-        if (type == 0xFFFFFFFF)
-            RegDeleteValueA(k, name.c_str());
-        else
-            RegSetValueExA(k, name.c_str(), 0, type, it.second.data() + 4, (DWORD)it.second.size() - 4);
-        RegCloseKey(k);
+        WriteBackBlob(root, id.substr(p1 + 1, p2 - p1 - 1), id.substr(p2 + 1), it.second);
         ++restored;
     }
-    RegDeleteKeyA(HKEY_LOCAL_MACHINE, kBackupKey);
+    RegDeleteKeyA(HKEY_LOCAL_MACHINE, key);
     return restored;
 }
 
-// ---------------------------------------------------------------------------
-// Твіки
-// ---------------------------------------------------------------------------
+int RestoreAllRegistryBackups() { return RestoreBackupKey(kBackupKey) + RestoreBackupKey(kLegacyBackupKey); }
 
-static bool InterfaceHasIp(const std::string& guid) {
-    std::string path = std::string(kTcpIfaces) + "\\" + guid;
-    char buf[512];
-    DWORD sz = sizeof(buf);
-    if (RegGetValueA(HKEY_LOCAL_MACHINE, path.c_str(), "DhcpIPAddress", RRF_RT_REG_SZ, nullptr, buf, &sz) ==
-            ERROR_SUCCESS &&
-        buf[0] && strcmp(buf, "0.0.0.0") != 0)
-        return true;
-    sz = sizeof(buf);
-    if (RegGetValueA(HKEY_LOCAL_MACHINE, path.c_str(), "IPAddress", RRF_RT_REG_MULTI_SZ, nullptr, buf, &sz) ==
-            ERROR_SUCCESS &&
-        buf[0] && strcmp(buf, "0.0.0.0") != 0)
-        return true;
-    return false;
+bool StateSave(const std::string& id, const std::string& value, bool overwrite) {
+    HKEY k;
+    if (RegCreateKeyExA(HKEY_LOCAL_MACHINE, kStateKey, 0, nullptr, 0, KEY_READ | KEY_WRITE, nullptr, &k, nullptr) !=
+        ERROR_SUCCESS)
+        return false;
+    bool exists = RegQueryValueExA(k, id.c_str(), nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+    bool ok = true;
+    if (!exists || overwrite)
+        ok = RegSetValueExA(k, id.c_str(), 0, REG_SZ, (const BYTE*)value.c_str(), (DWORD)value.size() + 1) ==
+             ERROR_SUCCESS;
+    RegCloseKey(k);
+    return ok;
 }
 
-void ApplyNetworkTweaks() {
-    int n = 0;
-    for (auto& guid : SubKeys(HKEY_LOCAL_MACHINE, kTcpIfaces)) {
-        if (!InterfaceHasIp(guid)) continue;
-        std::string path = std::string(kTcpIfaces) + "\\" + guid;
-        bool ok = SetDword(HKEY_LOCAL_MACHINE, path, "TcpAckFrequency", 1) &&
-                  SetDword(HKEY_LOCAL_MACHINE, path, "TCPNoDelay", 1) &&
-                  SetDword(HKEY_LOCAL_MACHINE, path, "TcpDelAckTicks", 0);
-        Log("[%s] Нейгл вимкнено: %s", ok ? "OK" : "ПОМИЛКА", guid.c_str());
-        ++n;
+bool StateLoad(const std::string& id, std::string& value) { return RegGetString(HKEY_LOCAL_MACHINE, kStateKey, id, value); }
+
+void StateDelete(const std::string& id) {
+    HKEY k;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, kStateKey, 0, KEY_WRITE, &k) == ERROR_SUCCESS) {
+        RegDeleteValueA(k, id.c_str());
+        RegCloseKey(k);
     }
-    if (!n) Log("[!] Не знайдено активних мережевих інтерфейсів з IP");
-
-    bool ok = SetDword(HKEY_LOCAL_MACHINE, kSysProfile, "NetworkThrottlingIndex", 0xFFFFFFFF);
-    Log("[%s] NetworkThrottlingIndex вимкнено", ok ? "OK" : "ПОМИЛКА");
-    ok = SetDword(HKEY_LOCAL_MACHINE, kSysProfile, "SystemResponsiveness", 10);
-    Log("[%s] SystemResponsiveness = 10", ok ? "OK" : "ПОМИЛКА");
-    ok = SetDword(HKEY_LOCAL_MACHINE, kGamesTask, "GPU Priority", 8) &&
-         SetDword(HKEY_LOCAL_MACHINE, kGamesTask, "Priority", 6) &&
-         SetString(HKEY_LOCAL_MACHINE, kGamesTask, "Scheduling Category", "High") &&
-         SetString(HKEY_LOCAL_MACHINE, kGamesTask, "SFIO Priority", "High");
-    Log("[%s] MMCSS пріоритети для ігор (GPU 8, CPU 6, High)", ok ? "OK" : "ПОМИЛКА");
-    Log("Частина змін набуде чинності після перезавантаження ПК.");
 }
 
-bool GlobalTimerSupported() { return WindowsBuild() >= 20348; }
+// ---------------------------------------------------------------------------
+// Служби
+// ---------------------------------------------------------------------------
 
-bool GlobalTimerEnabled() {
-    DWORD v;
-    return GetDword(HKEY_LOCAL_MACHINE, kKernel, "GlobalTimerResolutionRequests", v) && v == 1;
-}
-
-void EnableGlobalTimerResolution() {
-    if (!GlobalTimerSupported()) {
-        Log("Збірка Windows %lu не підтримує GlobalTimerResolutionRequests", WindowsBuild());
-        return;
+bool ServiceGetStart(const char* name, DWORD& start) {
+    SC_HANDLE scm = OpenSCManagerA(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm) return false;
+    SC_HANDLE s = OpenServiceA(scm, name, SERVICE_QUERY_CONFIG);
+    bool ok = false;
+    if (s) {
+        DWORD need = 0;
+        QueryServiceConfigA(s, nullptr, 0, &need);
+        std::vector<BYTE> buf(need + 16);
+        auto* cfg = (QUERY_SERVICE_CONFIGA*)buf.data();
+        if (QueryServiceConfigA(s, cfg, (DWORD)buf.size(), &need)) {
+            start = cfg->dwStartType;
+            ok = true;
+        }
+        CloseServiceHandle(s);
     }
-    bool ok = SetDword(HKEY_LOCAL_MACHINE, kKernel, "GlobalTimerResolutionRequests", 1);
-    Log("[%s] GlobalTimerResolutionRequests = 1 (потрібне перезавантаження)", ok ? "OK" : "ПОМИЛКА");
+    CloseServiceHandle(scm);
+    return ok;
 }
 
-void ApplyQosForGame(const std::string& exe) {
-    if (exe.empty()) return;
+bool ServiceSetStart(const char* name, DWORD start) {
+    SC_HANDLE scm = OpenSCManagerA(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm) return false;
+    SC_HANDLE s = OpenServiceA(scm, name, SERVICE_CHANGE_CONFIG);
+    bool ok = s && ChangeServiceConfigA(s, SERVICE_NO_CHANGE, start, SERVICE_NO_CHANGE, nullptr, nullptr, nullptr,
+                                        nullptr, nullptr, nullptr, nullptr);
+    if (s) CloseServiceHandle(s);
+    CloseServiceHandle(scm);
+    return ok;
+}
+
+void ServiceStop(const char* name) {
+    SC_HANDLE scm = OpenSCManagerA(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm) return;
+    SC_HANDLE s = OpenServiceA(scm, name, SERVICE_STOP);
+    if (s) {
+        SERVICE_STATUS st;
+        ControlService(s, SERVICE_CONTROL_STOP, &st);
+        CloseServiceHandle(s);
+    }
+    CloseServiceHandle(scm);
+}
+
+void ServiceStart(const char* name) {
+    SC_HANDLE scm = OpenSCManagerA(nullptr, nullptr, SC_MANAGER_CONNECT);
+    if (!scm) return;
+    SC_HANDLE s = OpenServiceA(scm, name, SERVICE_START);
+    if (s) {
+        StartServiceA(s, 0, nullptr);
+        CloseServiceHandle(s);
+    }
+    CloseServiceHandle(scm);
+}
+
+// ---------------------------------------------------------------------------
+// QoS
+// ---------------------------------------------------------------------------
+
+bool QosIsSet(const std::string& exe) {
     std::string path = std::string(kQosRoot) + "\\" + kQosPrefix + exe;
-    // Ключ політики створюємо самі — відкат видаляє його цілком, бекап не потрібен.
-    bool ok = SetString(HKEY_LOCAL_MACHINE, path, "Version", "1.0", false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "Application Name", exe, false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "Protocol", "*", false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "Local Port", "*", false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "Local IP", "*", false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "Local IP Prefix Length", "*", false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "Remote Port", "*", false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "Remote IP", "*", false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "Remote IP Prefix Length", "*", false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "DSCP Value", "46", false) &&
-              SetString(HKEY_LOCAL_MACHINE, path, "Throttle Rate", "-1", false);
-    // Без цього Windows ставить DSCP лише в доменних мережах.
-    ok = ok && SetString(HKEY_LOCAL_MACHINE, kTcpQos, "Do not use NLA", "1");
-    Log("[%s] QoS DSCP 46 для %s", ok ? "OK" : "ПОМИЛКА", exe.c_str());
-    if (ok) {
-        Log("Оновлюю групові політики (gpupdate)...");
-        RunHidden("gpupdate.exe /target:computer /force");
-        Log("Готово.");
-    }
+    std::string v;
+    return RegGetString(HKEY_LOCAL_MACHINE, path, "DSCP Value", v) && v == "46";
 }
 
-static int RemoveQosPolicies() {
+bool QosApply(const std::string& exe) {
+    if (exe.empty()) return false;
+    std::string path = std::string(kQosRoot) + "\\" + kQosPrefix + exe;
+    // Ключ політики створюємо самі — видаляємо його цілком, окремий бекап не потрібен.
+    const char* keys[][2] = {{"Version", "1.0"},
+                             {"Application Name", exe.c_str()},
+                             {"Protocol", "*"},
+                             {"Local Port", "*"},
+                             {"Local IP", "*"},
+                             {"Local IP Prefix Length", "*"},
+                             {"Remote Port", "*"},
+                             {"Remote IP", "*"},
+                             {"Remote IP Prefix Length", "*"},
+                             {"DSCP Value", "46"},
+                             {"Throttle Rate", "-1"}};
+    bool ok = true;
+    for (auto& kv : keys) ok = ok && RegApply(Sz(HKEY_LOCAL_MACHINE, path, kv[0], kv[1]), false);
+    // Без цього Windows ставить DSCP лише в доменних мережах.
+    ok = ok && RegApply(Sz(HKEY_LOCAL_MACHINE, kTcpQos, "Do not use NLA", "1"));
+    if (ok) RunHidden("gpupdate.exe /target:computer /force");
+    return ok;
+}
+
+bool QosRemove(const std::string& exe) {
+    std::string path = std::string(kQosRoot) + "\\" + kQosPrefix + exe;
+    bool ok = RegDeleteKeyA(HKEY_LOCAL_MACHINE, path.c_str()) == ERROR_SUCCESS;
+    RunHidden("gpupdate.exe /target:computer /force");
+    return ok;
+}
+
+int QosRemoveAll() {
     int n = 0;
-    for (auto& name : SubKeys(HKEY_LOCAL_MACHINE, kQosRoot)) {
-        if (name.rfind(kQosPrefix, 0) != 0) continue;
+    for (auto& name : RegSubKeys(HKEY_LOCAL_MACHINE, kQosRoot)) {
+        if (name.rfind(kQosPrefix, 0) != 0 && name.rfind(kLegacyQosPrefix, 0) != 0) continue;
         std::string path = std::string(kQosRoot) + "\\" + name;
         if (RegDeleteKeyA(HKEY_LOCAL_MACHINE, path.c_str()) == ERROR_SUCCESS) ++n;
     }
+    if (n) RunHidden("gpupdate.exe /target:computer /force");
     return n;
-}
-
-void RevertAll() {
-    int r = RestoreBackup();
-    int q = RemoveQosPolicies();
-    Log("Відновлено значень реєстру: %d, видалено QoS-політик: %d", r, q);
-    if (q) RunHidden("gpupdate.exe /target:computer /force");
-    Log("Перезавантаж ПК, щоб усе повернулося повністю.");
-}
-
-TweakStatus GetTweakStatus() {
-    TweakStatus s;
-    DWORD v;
-    for (auto& guid : SubKeys(HKEY_LOCAL_MACHINE, kTcpIfaces)) {
-        if (!InterfaceHasIp(guid)) continue;
-        ++s.ifaces;
-        std::string path = std::string(kTcpIfaces) + "\\" + guid;
-        if (GetDword(HKEY_LOCAL_MACHINE, path, "TcpAckFrequency", v) && v == 1 &&
-            GetDword(HKEY_LOCAL_MACHINE, path, "TCPNoDelay", v) && v == 1)
-            ++s.nagleOff;
-    }
-    s.throttlingOff = GetDword(HKEY_LOCAL_MACHINE, kSysProfile, "NetworkThrottlingIndex", v) && v == 0xFFFFFFFF;
-    if (GetDword(HKEY_LOCAL_MACHINE, kSysProfile, "SystemResponsiveness", v)) s.sysResponsiveness = v;
-    std::string cat;
-    s.mmcss = GetDword(HKEY_LOCAL_MACHINE, kGamesTask, "GPU Priority", v) && v == 8 &&
-              GetString(HKEY_LOCAL_MACHINE, kGamesTask, "Scheduling Category", cat) && cat == "High";
-    s.globalTimer = GlobalTimerEnabled();
-    std::string nla;
-    s.nla = GetString(HKEY_LOCAL_MACHINE, kTcpQos, "Do not use NLA", nla) && nla == "1";
-    for (auto& name : SubKeys(HKEY_LOCAL_MACHINE, kQosRoot))
-        if (name.rfind(kQosPrefix, 0) == 0) s.qosGames.push_back(name.substr(strlen(kQosPrefix)));
-    return s;
 }
 
 void FlushDns() {
@@ -513,6 +627,64 @@ void FlushDns() {
     bool ok = fn && fn();
     Log("[%s] DNS-кеш очищено", ok ? "OK" : "ПОМИЛКА");
     if (dns) FreeLibrary(dns);
+}
+
+// ---------------------------------------------------------------------------
+// Пам'ять
+// ---------------------------------------------------------------------------
+
+MemInfo GetMemInfo() {
+    MemInfo m;
+    MEMORYSTATUSEX ms{};
+    ms.dwLength = sizeof(ms);
+    if (GlobalMemoryStatusEx(&ms)) {
+        m.total = ms.ullTotalPhys;
+        m.avail = ms.ullAvailPhys;
+        m.load = ms.dwMemoryLoad;
+    }
+    return m;
+}
+
+CleanResult CleanMemory(const std::vector<std::string>& exclude) {
+    CleanResult r;
+    MemInfo before = GetMemInfo();
+    EnablePrivilege("SeProfileSingleProcessPrivilege");
+    EnablePrivilege("SeIncreaseQuotaPrivilege");
+
+    std::vector<std::string> ex;
+    for (auto& e : exclude) ex.push_back(ToLower(e));
+    DWORD self = GetCurrentProcessId();
+
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32 pe{};
+        pe.dwSize = sizeof(pe);
+        if (Process32First(snap, &pe)) {
+            do {
+                if (pe.th32ProcessID == self || pe.th32ProcessID <= 4) continue;
+                if (std::find(ex.begin(), ex.end(), ToLower(pe.szExeFile)) != ex.end()) continue;
+                HANDLE h = OpenProcess(PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID);
+                if (!h) continue;
+                if (EmptyWorkingSet(h)) ++r.trimmed;
+                CloseHandle(h);
+            } while (Process32Next(snap, &pe));
+        }
+        CloseHandle(snap);
+    }
+
+    // Очищення standby-списку (кеш файлів, який іноді "не віддається" іграм)
+    typedef LONG(NTAPI * NtSetSystemInformation_t)(int, PVOID, ULONG);
+    auto fn = (NtSetSystemInformation_t)(void*)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtSetSystemInformation");
+    if (fn) {
+        const int SystemMemoryListInformation = 80;
+        int cmd = 4;  // MemoryPurgeStandbyList
+        r.standbyPurged = fn(SystemMemoryListInformation, &cmd, sizeof(cmd)) == 0;
+    }
+    MemInfo after = GetMemInfo();
+    r.freedBytes = (LONGLONG)after.avail - (LONGLONG)before.avail;
+    Log("[OK] Очистка ОЗУ: звільнено %.0f МБ (процесів: %d, standby: %s)", r.freedBytes / 1048576.0, r.trimmed,
+        r.standbyPurged ? "очищено" : "без змін");
+    return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -547,9 +719,8 @@ static void Finish(PingResult& r, const std::vector<double>& rtts) {
     r.jitter = rtts.size() > 1 ? jit / (rtts.size() - 1) : 0;
 }
 
-// Один ICMP-запит, повертає RTT або -1
 static double IcmpOnce(HANDLE h, const sockaddr_in& addr) {
-    char payload[32] = "LukashBoost-ping";
+    char payload[32] = "KairoBoost-ping";
     BYTE reply[sizeof(ICMP_ECHO_REPLY) + sizeof(payload) + 64];
     double t0 = NowMs();
     DWORD n = IcmpSendEcho(h, addr.sin_addr.s_addr, payload, sizeof(payload), nullptr, reply, sizeof(reply), 2000);
@@ -558,7 +729,6 @@ static double IcmpOnce(HANDLE h, const sockaddr_in& addr) {
     return (n > 0 && rep->Status == IP_SUCCESS) ? dt : -1;
 }
 
-// Один TCP-connect, повертає час встановлення з'єднання або -1
 static double TcpOnce(const sockaddr_in& addr) {
     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == INVALID_SOCKET) return -1;
@@ -617,14 +787,13 @@ PingResult Ping(const std::string& target, int count, const SampleFn& sample, co
 }
 
 void LogPing(const PingResult& r) {
-    if (!r.resolved) {
+    if (!r.resolved)
         Log("%s: не вдалося знайти адресу", r.target.c_str());
-    } else if (!r.received) {
+    else if (!r.received)
         Log("%s (%s): немає відповідей (100%% втрат)", r.target.c_str(), r.ip.c_str());
-    } else {
+    else
         Log("%s (%s): мін %.1f / сер %.1f / макс %.1f мс, джитер %.1f мс, втрати %.0f%%", r.target.c_str(),
             r.ip.c_str(), r.min, r.avg, r.max, r.jitter, r.Loss());
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -650,8 +819,8 @@ DWORD FindProcess(const std::string& exe) {
     return pid;
 }
 
-void RunGameMode(const std::string& exe, ULONG resolution, const std::atomic<bool>& stop,
-                 std::atomic<DWORD>* gamePid) {
+void RunGameMode(const std::string& exe, ULONG resolution, const std::atomic<bool>& stop, std::atomic<DWORD>* gamePid,
+                 const std::function<void(DWORD)>& onStart) {
     Log("Режим гри: %s", exe.c_str());
     ULONG actual = 0;
     if (TimerHold(resolution, &actual))
@@ -674,22 +843,29 @@ void RunGameMode(const std::string& exe, ULONG resolution, const std::atomic<boo
         waitingShown = false;
         if (gamePid) *gamePid = pid;
         Log("Гру знайдено (PID %lu)", pid);
+        if (onStart) onStart(pid);
+
         HANDLE h = OpenProcess(PROCESS_SET_INFORMATION | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
-        if (!h) {
-            Log("[!] Немає доступу до процесу (потрібні права адміністратора), код %lu", GetLastError());
-            for (int i = 0; i < 30 && !stop; ++i) Sleep(100);
-            continue;
+        if (h) {
+            Log("[%s] Пріоритет процесу: High", SetPriorityClass(h, HIGH_PRIORITY_CLASS) ? "OK" : "ПОМИЛКА");
+            if (DisablePowerThrottling(h, PROCESS_POWER_THROTTLING_EXECUTION_SPEED |
+                                              PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION))
+                Log("[OK] EcoQoS / power throttling для гри вимкнено");
+            else
+                Log("EcoQoS: ця версія Windows не підтримує керування (пропущено)");
+        } else {
+            // Ігри з античитом (Fortnite + EasyAntiCheat) захищають свій процес — це нормально.
+            Log("Процес захищений античитом — пріоритет ставиться через твік «Високий пріоритет CPU» (Fortnite).");
+            h = OpenProcess(SYNCHRONIZE, FALSE, pid);
         }
-        Log("[%s] Пріоритет процесу: High", SetPriorityClass(h, HIGH_PRIORITY_CLASS) ? "OK" : "ПОМИЛКА");
-        bool pt = DisablePowerThrottling(h, PROCESS_POWER_THROTTLING_EXECUTION_SPEED |
-                                                PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION);
-        if (pt)
-            Log("[OK] EcoQoS / power throttling для гри вимкнено");
-        else
-            Log("EcoQoS: ця версія Windows не підтримує керування (пропущено)");
-        while (!stop && WaitForSingleObject(h, 300) == WAIT_TIMEOUT) {
+        if (h) {
+            while (!stop && WaitForSingleObject(h, 300) == WAIT_TIMEOUT) {
+            }
+            CloseHandle(h);
+        } else {
+            while (!stop && FindProcess(exe) == pid)
+                for (int i = 0; i < 10 && !stop; ++i) Sleep(100);
         }
-        CloseHandle(h);
         if (gamePid) *gamePid = 0;
         if (!stop) Log("Гру закрито. Чекаю наступного запуску...");
     }

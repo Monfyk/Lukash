@@ -13,7 +13,7 @@ jobs:
         run: cmake --build build --config Release
       - uses: actions/upload-artifact@v4
         with:
-          name: LukashBoost
+          name: KairoBoost
           path: |
-            build/Release/LukashBoost.exe
-            build/Release/LukashBoost-cli.exe
+            build/Release/KairoBoost.exe
+            build/Release/KairoBoost-cli.exe

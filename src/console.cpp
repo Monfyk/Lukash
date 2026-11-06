@@ -1,5 +1,7 @@
-// LukashBoost — консольна версія (меню + командний рядок)
+// KairoBoost — консольна версія (меню + командний рядок)
 #include "core.h"
+#include "fortnite.h"
+#include "tweaks.h"
 
 #include <algorithm>
 #include <atomic>
@@ -39,34 +41,37 @@ static ULONG ParseResolutionMs(const std::string& s, ULONG def) {
     return ms > 0 ? (ULONG)std::lround(ms * 10000.0) : def;
 }
 
+static std::vector<std::string> DefaultExclude() {
+    return {fn::kExe, "EasyAntiCheat_EOS.exe", "audiodg.exe", "obs64.exe", "Discord.exe", "KairoBoost-cli.exe"};
+}
+
 static void PrintTimerStatus() {
     ULONG coarsest, finest, current;
-    if (!TimerQuery(coarsest, finest, current)) {
-        printf("  Не вдалося прочитати роздільність таймера.\n");
-        return;
-    }
-    printf("  Поточна роздільність: %.4f мс (діапазон %.4f ... %.4f мс)\n", current / 10000.0, finest / 10000.0,
+    if (!TimerQuery(coarsest, finest, current)) return;
+    printf("  Timer Resolution: %.4f мс (діапазон %.4f ... %.4f мс)", current / 10000.0, finest / 10000.0,
            coarsest / 10000.0);
-    ULONG held = TimerHeld();
-    if (held) printf("  LukashBoost тримає:   %.4f мс\n", held / 10000.0);
+    if (TimerHeld()) printf(", KairoBoost тримає %.4f мс", TimerHeld() / 10000.0);
+    printf("\n");
 }
 
-static void PrintStatus() {
-    PrintTimerStatus();
-    TweakStatus s = GetTweakStatus();
-    printf("  Нейгл вимкнено:       %d з %d інтерфейсів\n", s.nagleOff, s.ifaces);
-    printf("  Network throttling:   %s\n", s.throttlingOff ? "вимкнено" : "за замовчуванням");
-    printf("  SystemResponsiveness: %lu\n", s.sysResponsiveness);
-    printf("  MMCSS для ігор:       %s\n", s.mmcss ? "так" : "ні");
-    printf("  Глобальний таймер:    %s\n", s.globalTimer ? "увімкнено" : "вимкнено");
-    for (auto& g : s.qosGames) printf("  QoS DSCP 46:          %s\n", g.c_str());
+static void PrintTweaks() {
+    const auto& all = tw::All();
+    for (size_t i = 0; i < all.size(); ++i) {
+        const auto& t = all[i];
+        std::string why = tw::Unavailable(t);
+        printf("  %2zu) [%s] %-12s %s%s\n", i + 1, !why.empty() ? "--" : (tw::IsOn(t) ? "ON" : "  "),
+               tw::CategoryName(t.category), t.name, t.recommended ? "  *" : "");
+    }
+    printf("  (* — рекомендовано)\n");
 }
 
-static void RunGame(const std::string& exe, ULONG res) {
+static void RunGame(const std::string& exe, ULONG res, bool cleanRam) {
     printf("  Ctrl+C — зупинити режим гри\n");
     g_stop = false;
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
-    RunGameMode(exe, res, g_stop);
+    RunGameMode(exe, res, g_stop, nullptr, [cleanRam](DWORD) {
+        if (cleanRam) CleanMemory(DefaultExclude());
+    });
     SetConsoleCtrlHandler(CtrlHandler, FALSE);
 }
 
@@ -89,62 +94,63 @@ static void Compare(const std::vector<std::string>& targets, int count) {
     for (auto& r : res) LogPing(r);
 }
 
-static void TimerMenu() {
+static void FortnitePing(int count) {
+    std::vector<std::string> hosts;
+    for (auto& r : fn::Regions()) hosts.push_back(r.host);
+    Compare(hosts, count);
+}
+
+static void TweaksMenu() {
     for (;;) {
-        printf("\n=== Timer Resolution ===\n");
-        PrintTimerStatus();
-        printf("  1) 0.5 мс   2) Своє значення   3) Авто-підбір   4) Тест Sleep(1)\n"
-               "  5) Відпустити   6) Глобальний таймер (Windows 11)   0) Назад\n");
-        std::string c = ReadLine("> ");
-        if (c == "1") {
-            printf("  %s\n", TimerHold(5000) ? "Готово." : "Помилка.");
-        } else if (c == "2") {
-            ULONG v = ParseResolutionMs(ReadLine("  Значення в мс (напр. 0.507): "), 0);
-            if (v) printf("  %s\n", TimerHold(v) ? "Готово." : "Помилка.");
-        } else if (c == "3") {
-            AutoTuneResolution();
-        } else if (c == "4") {
-            SleepStats s = MeasureSleep1(300);
-            printf("  Sleep(1): сер %.3f мс, мін %.3f, макс %.3f\n", s.avg, s.min, s.max);
-        } else if (c == "5") {
-            TimerRelease();
-        } else if (c == "6") {
-            EnableGlobalTimerResolution();
+        printf("\n=== Твіки ===\n");
+        PrintTweaks();
+        std::string c = ReadLine("\n  Номер — увімкнути/вимкнути, r — рекомендовані, x — відкотити все, 0 — назад: ");
+        if (c == "r") {
+            tw::ApplyRecommended(true);
+        } else if (c == "x") {
+            if (ReadLine("  Точно? (y/n): ") == "y") tw::RevertEverything();
         } else {
-            return;
+            int n = atoi(c.c_str());
+            const auto& all = tw::All();
+            if (n <= 0 || n > (int)all.size()) return;
+            const auto& t = all[n - 1];
+            if (tw::IsOn(t)) tw::Revert(t); else tw::Apply(t);
         }
     }
 }
 
 static void MainMenu() {
     for (;;) {
-        printf("\n=== LukashBoost ===\n");
+        printf("\n=== KairoBoost ===\n");
         if (!IsElevated()) printf("  [!] Без прав адміністратора твіки не спрацюють.\n");
-        printf("  1) Timer Resolution\n  2) Тест мережі\n  3) Мережеві твіки\n  4) QoS для гри\n"
-               "  5) Режим гри\n  6) Стан\n  7) Відкотити все\n  8) Очистити DNS\n  0) Вихід\n");
+        PrintTimerStatus();
+        printf("  1) Твіки\n  2) Timer Resolution: авто-підбір\n  3) Тест Sleep(1)\n  4) Тест мережі\n"
+               "  5) Пінг до серверів Fortnite\n  6) Очистка ОЗУ\n  7) Режим гри\n  8) Очистити DNS\n  0) Вихід\n");
         std::string c = ReadLine("> ");
         if (c == "1") {
-            TimerMenu();
+            TweaksMenu();
         } else if (c == "2") {
+            AutoTuneResolution();
+            Pause();
+        } else if (c == "3") {
+            SleepStats s = MeasureSleep1(300);
+            printf("  Sleep(1): сер %.3f мс, мін %.3f, макс %.3f\n", s.avg, s.min, s.max);
+            Pause();
+        } else if (c == "4") {
             auto t = Split(ReadLine("  Сервери (напр. 1.1.1.1 8.8.8.8 google.com:443): "));
             int n = atoi(ReadLine("  Кількість запитів [20]: ").c_str());
             if (!t.empty()) Compare(t, n > 0 ? n : 20);
             Pause();
-        } else if (c == "3") {
-            ApplyNetworkTweaks();
-            Pause();
-        } else if (c == "4") {
-            ApplyQosForGame(ReadLine("  exe гри (напр. cs2.exe): "));
-            Pause();
         } else if (c == "5") {
-            std::string exe = ReadLine("  exe гри (напр. cs2.exe): ");
-            if (!exe.empty()) RunGame(exe, ParseResolutionMs(ReadLine("  Timer Resolution в мс [0.5]: "), 5000));
+            FortnitePing(20);
             Pause();
         } else if (c == "6") {
-            PrintStatus();
+            CleanMemory(DefaultExclude());
             Pause();
         } else if (c == "7") {
-            if (ReadLine("  Точно? (y/n): ") == "y") RevertAll();
+            std::string exe = ReadLine("  exe гри [FortniteClient-Win64-Shipping.exe]: ");
+            if (exe.empty()) exe = fn::kExe;
+            RunGame(exe, ParseResolutionMs(ReadLine("  Timer Resolution в мс [0.5]: "), 5000), true);
             Pause();
         } else if (c == "8") {
             FlushDns();
@@ -156,11 +162,13 @@ static void MainMenu() {
 }
 
 static void Usage() {
-    printf("LukashBoost-cli.exe                              меню\n"
+    printf("KairoBoost-cli.exe                               меню\n"
            "  --res 0.5                                      тримати Timer Resolution\n"
-           "  --game cs2.exe [--res 0.5] [--qos]             режим гри\n"
+           "  --game [exe] [--res 0.5] [--clean-ram]          режим гри (типово Fortnite)\n"
            "  --ping host[:port] [...] [--count 20]          тест / порівняння серверів\n"
-           "  --apply | --revert | --status\n");
+           "  --fortnite-ping                                пінг до регіонів Fortnite\n"
+           "  --apply-recommended | --revert-all | --status\n"
+           "  --clean-ram                                    очистити ОЗУ\n");
 }
 
 int main(int argc, char** argv) {
@@ -176,18 +184,21 @@ int main(int argc, char** argv) {
         return 0;
     }
     std::string game;
+    bool gameMode = false, cleanRam = false, apply = false, revert = false, status = false, fnPing = false;
     ULONG res = 0;
-    bool qos = false, apply = false, revert = false, status = false;
     int count = 20;
     std::vector<std::string> pings;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--res" && i + 1 < argc) res = ParseResolutionMs(argv[++i], 5000);
-        else if (a == "--game" && i + 1 < argc) game = argv[++i];
-        else if (a == "--qos") qos = true;
-        else if (a == "--apply") apply = true;
-        else if (a == "--revert") revert = true;
+        else if (a == "--game") {
+            gameMode = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') game = argv[++i];
+        } else if (a == "--clean-ram") cleanRam = true;
+        else if (a == "--apply-recommended") apply = true;
+        else if (a == "--revert-all") revert = true;
         else if (a == "--status") status = true;
+        else if (a == "--fortnite-ping") fnPing = true;
         else if (a == "--count" && i + 1 < argc) count = std::max(1, atoi(argv[++i]));
         else if (a == "--ping") {
             while (i + 1 < argc && argv[i + 1][0] != '-') pings.push_back(argv[++i]);
@@ -196,22 +207,28 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
-    if (revert) RevertAll();
-    if (apply) ApplyNetworkTweaks();
-    if (status) PrintStatus();
+    if (revert) tw::RevertEverything();
+    if (apply) tw::ApplyRecommended(true);
+    if (status) {
+        PrintTimerStatus();
+        PrintTweaks();
+    }
     if (!pings.empty()) Compare(pings, count);
-    if (!game.empty()) {
-        if (qos) ApplyQosForGame(game);
-        RunGame(game, res ? res : 5000);
-    } else if (res) {
-        ULONG actual = 0;
-        if (!TimerHold(res, &actual)) {
-            printf("Не вдалося встановити Timer Resolution\n");
-            return 1;
+    if (fnPing) FortnitePing(count);
+    if (gameMode) {
+        RunGame(game.empty() ? fn::kExe : game, res ? res : 5000, cleanRam);
+    } else {
+        if (cleanRam) CleanMemory(DefaultExclude());
+        if (res) {
+            ULONG actual = 0;
+            if (!TimerHold(res, &actual)) {
+                printf("Не вдалося встановити Timer Resolution\n");
+                return 1;
+            }
+            printf("Timer Resolution: %.4f мс. Ctrl+C — вихід.\n", actual / 10000.0);
+            SetConsoleCtrlHandler(CtrlHandler, TRUE);
+            while (!g_stop) Sleep(500);
         }
-        printf("Timer Resolution: %.4f мс. Ctrl+C — вихід.\n", actual / 10000.0);
-        SetConsoleCtrlHandler(CtrlHandler, TRUE);
-        while (!g_stop) Sleep(500);
     }
     Shutdown();
     return 0;
