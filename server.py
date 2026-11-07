@@ -3,8 +3,8 @@
 Мандрівний Шукач — знаходить найвигідніші дати туди-назад, транспорт і житло.
 
 Запуск:  python3 server.py         → відкрий http://localhost:8000
-Живі ціни на авіаквитки: встанови TRAVELPAYOUTS_TOKEN (безкоштовно на travelpayouts.com).
-Без токена програма працює в режимі «оцінки» (модель цін) — посилання на сайти все одно справжні.
+Ціни — оцінка (модель цін); посилання на сайти справжні, точну ціну показує сайт.
+Без російських сервісів.
 
 Лише стандартна бібліотека Python 3.8+, нічого встановлювати не треба.
 """
@@ -14,17 +14,13 @@ import math
 import os
 import statistics
 import urllib.parse
-import urllib.request
 from datetime import date, datetime, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 from cities import BY_CODE, find_city
 
-TOKEN = os.environ.get("TRAVELPAYOUTS_TOKEN", "").strip()
-MARKER = os.environ.get("TRAVELPAYOUTS_MARKER", "").strip()
 PORT = int(os.environ.get("PORT", "8000"))
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-_cache = {}
 
 
 # ───────────────────────── допоміжне ─────────────────────────
@@ -129,57 +125,10 @@ def est_stay(d, checkin: date, nights: int, adults: int, min_rating: float = 8.0
     return sorted(opts, key=lambda x: x["price"])
 
 
-# ───────────────────────── живі ціни (Travelpayouts / Aviasales Data API) ─────────────────────────
-def http_json(url: str, timeout=12):
-    if url in _cache:
-        return _cache[url]
-    req = urllib.request.Request(url, headers={"Accept-Encoding": "identity", "User-Agent": "travel-finder/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = json.loads(r.read().decode())
-    _cache[url] = data
-    return data
-
-
-def live_flights(o, d, start: date, end: date, currency="eur"):
-    """Повертає {(дата_вильоту, ночі): {...}} з реальних кешованих цін Aviasales."""
-    if not TOKEN:
-        return {}, None
-    found, err = {}, None
-    months = sorted({(start + timedelta(days=i)).strftime("%Y-%m") for i in range((end - start).days + 1)})
-    for m in months:
-        q = urllib.parse.urlencode({
-            "origin": o["code"], "destination": d["code"], "departure_at": m,
-            "one_way": "false", "sorting": "price", "limit": 1000,
-            "currency": currency, "token": TOKEN,
-        })
-        try:
-            data = http_json("https://api.travelpayouts.com/aviasales/v3/prices_for_dates?" + q)
-        except Exception as e:  # noqa
-            err = str(e)
-            continue
-        for it in data.get("data", []):
-            try:
-                dep = datetime.fromisoformat(it["departure_at"]).date()
-                ret = datetime.fromisoformat(it["return_at"]).date()
-            except Exception:  # noqa
-                continue
-            key = (dep, (ret - dep).days)
-            if key not in found or it["price"] < found[key]["price"]:
-                link = it.get("link")
-                found[key] = {
-                    "price": it["price"],
-                    "airline": it.get("airline"),
-                    "transfers": max(it.get("transfers", 0), it.get("return_transfers", 0)),
-                    "link": ("https://www.aviasales.com" + link + (f"&marker={MARKER}" if MARKER else "")) if link else None,
-                }
-    return found, err
-
-
 # ───────────────────────── посилання на сайти ─────────────────────────
 def links_flight(o, d, dep: date, ret: date, adults: int):
     a = adults
     return [
-        {"site": "Aviasales", "url": f"https://www.aviasales.com/search/{o['code']}{dep:%d%m}{d['code']}{ret:%d%m}{a}" + (f"?marker={MARKER}" if MARKER else "")},
         {"site": "Skyscanner", "url": f"https://www.skyscanner.net/transport/flights/{o['code'].lower()}/{d['code'].lower()}/{dep:%y%m%d}/{ret:%y%m%d}/?adultsv2={a}&rtn=1"},
         {"site": "Google Flights", "url": "https://www.google.com/travel/flights?q=" + urllib.parse.quote(f"Flights from {o['code']} to {d['code']} on {dep} through {ret} {a} adults")},
         {"site": "Kiwi.com", "url": f"https://www.kiwi.com/deep?from={o['code']}&to={d['code']}&departure={dep:%d-%m-%Y}&return={ret:%d-%m-%Y}&adults={a}"},
@@ -221,19 +170,14 @@ def links_stay(d, cin: date, cout: date, adults: int, min_rating: float = 8.0, n
 # ───────────────────────── пошук ─────────────────────────
 def search(o, d, start: date, end: date, nmin: int, nmax: int, adults: int, with_links=True,
            min_rating: float = 8.0, no_hostels: bool = True):
-    live, live_err = live_flights(o, d, start, end)
     cells = []
     day = start
     while day <= end:
         for n in range(nmin, nmax + 1):
             ret = day + timedelta(days=n)
             # переліт
-            lf = live.get((day, n))
-            if lf:
-                fl = {"price": lf["price"] * adults, "transfers": lf["transfers"], "airline": lf["airline"], "source": "live", "link": lf["link"]}
-            else:
-                a, b = est_flight_oneway(o, d, day), est_flight_oneway(d, o, ret)
-                fl = {"price": (a["price"] + b["price"]) * adults, "transfers": max(a["transfers"], b["transfers"]), "source": "est"}
+            a, b = est_flight_oneway(o, d, day), est_flight_oneway(d, o, ret)
+            fl = {"price": (a["price"] + b["price"]) * adults, "transfers": max(a["transfers"], b["transfers"]), "source": "est"}
             # автобус/потяг
             g1, g2 = est_ground_oneway(o, d, day), est_ground_oneway(d, o, ret)
             ground = None
@@ -270,17 +214,13 @@ def search(o, d, start: date, end: date, nmin: int, nmax: int, adults: int, with
                 "ground_back": links_ground(d, o, ret, adults) if c["ground"] else [],
                 "stay": links_stay(d, dep, ret, adults, min_rating, no_hostels),
             }
-            if c["flight"].get("link"):
-                c["links"]["flight"].insert(0, {"site": "Aviasales (ця ціна)", "url": c["flight"]["link"]})
     return {
         "origin": o, "destination": d, "distance_km": round(km(o, d)),
         "adults": adults, "nights": [nmin, nmax], "min_rating": min_rating, "no_hostels": no_hostels, "range": [start.isoformat(), end.isoformat()],
         "median": round(med), "min": min(totals), "max": max(totals),
         "cells": [{k: c[k] for k in ("dep", "ret", "nights", "total", "deal", "ratio")} for c in cells],
         "best": best,
-        "mode": "live" if live else "estimate",
-        "live_error": live_err,
-        "has_token": bool(TOKEN),
+        "mode": "estimate",
     }
 
 
@@ -320,8 +260,6 @@ class Handler(SimpleHTTPRequestHandler):
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
         if u.path == "/api/cities":
             return self.send_json(sorted(BY_CODE.values(), key=lambda c: c["name"]))
-        if u.path == "/api/status":
-            return self.send_json({"has_token": bool(TOKEN)})
         if u.path == "/api/search":
             try:
                 o = find_city(q.get("from", "VIE"))
@@ -354,5 +292,4 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"✈  Мандрівний Шукач: http://localhost:{PORT}")
-    print("   Режим:", "ЖИВІ ціни на авіаквитки (Travelpayouts)" if TOKEN else "оцінка цін (додай TRAVELPAYOUTS_TOKEN для живих цін)")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

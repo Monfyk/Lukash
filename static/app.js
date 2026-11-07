@@ -17,9 +17,7 @@ fetch("/api/cities").then((r) => r.json()).then((list) => {
   $("#cities").innerHTML = opts;
   $("#cities-to").innerHTML = `<option value="Куди завгодно">🌍 найдешевші напрямки</option>` + opts;
 });
-fetch("/api/status").then((r) => r.json()).then((s) => {
-  $("#mode").textContent = s.has_token ? "🟢 живі ціни на авіаквитки" : "🟡 режим оцінки цін (без токена)";
-});
+$("#mode").textContent = "≈ ціни — оцінка, точні — на сайтах за посиланнями";
 
 $("#swap").onclick = () => { const a = $("#from").value; $("#from").value = $("#to").value; $("#to").value = a; };
 $("#anywhere").onclick = () => { $("#to").value = "Куди завгодно"; run(); };
@@ -61,7 +59,7 @@ function renderRoute(d) {
   const cheapest = d.best.filter((c) => c.deal === "absurd").length;
   out.innerHTML = `
   <div class="card">
-    <h2>${esc(o.name)} → ${esc(ds.name)} <span class="muted">${d.distance_km} км · ${d.adults} ос. · житло ★${d.min_rating}+${d.no_hostels ? ", без хостелів" : ""} · ${d.mode === "live" ? "живі ціни на переліт" : "оцінка цін"}</span></h2>
+    <h2>${esc(o.name)} → ${esc(ds.name)} <span class="muted">${d.distance_km} км · ${d.adults} ос. · житло ★${d.min_rating}+${d.no_hostels ? ", без хостелів" : ""} · оцінка цін</span></h2>
     <div class="stats">
       <div class="stat"><span>Найдешевша поїздка (все разом)</span><b>${eur(best.total)}</b><span>${fmtD(best.dep)} → ${fmtD(best.ret)}</span></div>
       <div class="stat"><span>Звичайна ціна (медіана)</span><b>${eur(d.median)}</b><span>економія ${Math.round((1 - best.total / d.median) * 100)}%</span></div>
@@ -152,7 +150,7 @@ function dealCard(c, d) {
     ${tr.mode === "flight" && c.ground ? `<div class="muted">Автобус / потяг:</div>${linkRow(L.ground)}` : ""}
     <div class="line"><div>${STAY_NAME[c.stay.type]} <span class="stars">★ ${c.stay.rating}</span><div class="m">${c.stays.slice(1).map((s) => `${STAY_NAME[s.type]} ★${s.rating} ≈ ${eur(s.price)}`).join(" · ")}</div></div><b>${eur(c.stay.price)}</b></div>
     ${linkRow(L.stay)}
-    <div class="src">${tr.source === "live" ? "✅ ціна перельоту — реальна (кеш Aviasales)" : "≈ оціночна ціна, точну перевір на сайті"}</div>
+    <div class="src">≈ оціночна ціна, точну перевір на сайті</div>
   </div>`;
 }
 
