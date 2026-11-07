@@ -14,6 +14,16 @@ Timer Resolution, твіки Windows, налаштування Fortnite, очи�
 
 *Скриншоти зроблені у Wine, тому цифри таймера і пам'яті там не такі, як на справжній Windows.*
 
+## Редакції
+
+| Файл | Для кого |
+|---|---|
+| `KairoBoost.exe` | Особиста версія, налаштована під Fortnite |
+| `KairoBoostPro.exe` | Версія для продажу: будь-яка гра — Fortnite, CS2, VALORANT, League of Legends, Apex, Call of Duty, Dota 2, Overwatch 2, Rocket League, Rainbow Six, PUBG, GTA V, Marvel Rivals, Tarkov, Roblox, Minecraft або своя гра (exe). Автопошук через Steam, Riot, Battle.net або запущений процес |
+| `KairoBoost-cli.exe` | Консольна версія |
+
+Обидві графічні версії збираються з одного коду (`src/edition.h`, прапорець `KB_SALE`).
+
 ## Чесно про пінг
 
 Сервіси на кшталт ExitLag зменшують пінг, пускаючи трафік гри **через свої сервери** (кращий маршрут + дублювання пакетів). Без такої мережі серверів жодна програма на ПК не змінить маршрут в інтернеті. KairoBoost не обіцяє «-50 пінгу», а робить те, що можна зробити локально: стабільніший FPS, менша затримка вводу, пріоритет трафіку гри у твоїй мережі і вибір найкращого регіону Fortnite.
@@ -111,6 +121,8 @@ KairoBoost не читає і не змінює пам'ять чи файли г
 * `src/tweaks.*` — каталог твіків
 * `src/fortnite.*` — пошук гри, налаштування, регіони
 * `src/dns.*` — тест і вибір DNS
+* `src/games.*` — підтримувані ігри, пошук гри, обрана гра
+* `src/advisor.*` — порадник
 * `src/gui.cpp` — графічний інтерфейс (Dear ImGui + DirectX 11)
 * `src/console.cpp` — консольна версія
 * `third_party/imgui` — [Dear ImGui](https://github.com/ocornut/imgui) 1.91.5 (MIT)

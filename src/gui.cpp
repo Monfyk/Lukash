@@ -3,6 +3,10 @@
 #include "fortnite.h"
 #include "tweaks.h"
 #include "dns.h"
+#include "edition.h"
+#include "games.h"
+
+#include <commdlg.h>
 #include "advisor.h"
 
 #include <shellapi.h>
@@ -244,7 +248,11 @@ struct App {
     double fnTime = -1e9;
 
     // Режим гри
-    char gameExe[128] = "FortniteClient-Win64-Shipping.exe";
+    char gameExe[256] = "FortniteClient-Win64-Shipping.exe";
+    // Обрана гра (редакція для продажу)
+    std::string gameId = "fortnite";
+    char customExe[MAX_PATH] = "";
+    char gamePath[MAX_PATH] = "";
     float gameRes = 0.5f;
     std::atomic<bool> gameStop{false};
     std::atomic<DWORD> gamePid{0};
@@ -314,6 +322,9 @@ static void SaveSettings(const App& a) {
     std::string f = SettingsFile();
     auto put = [&](const char* k, const std::string& v) { WritePrivateProfileStringA("KairoBoost", k, v.c_str(), f.c_str()); };
     put("GameExe", a.gameExe);
+    put("Game", a.gameId);
+    put("CustomExe", a.customExe);
+    put(("GamePath_" + a.gameId).c_str(), a.gamePath);
     put("GameRes", std::to_string(a.gameRes));
     put("FortniteDir", a.fnDir);
     put("RamAuto", a.ramAuto ? "1" : "0");
@@ -341,6 +352,9 @@ static void LoadSettings(App& a) {
     };
     std::string v;
     if ((v = get("GameExe")) != "\x01" && !v.empty()) snprintf(a.gameExe, sizeof(a.gameExe), "%s", v.c_str());
+    if ((v = get("Game")) != "\x01" && !v.empty()) a.gameId = v;
+    if ((v = get("CustomExe")) != "\x01") snprintf(a.customExe, sizeof(a.customExe), "%s", v.c_str());
+    if ((v = get(("GamePath_" + a.gameId).c_str())) != "\x01") snprintf(a.gamePath, sizeof(a.gamePath), "%s", v.c_str());
     if ((v = get("GameRes")) != "\x01") a.gameRes = std::clamp((float)atof(v.c_str()), 0.5f, 2.0f);
     if ((v = get("FortniteDir")) != "\x01") snprintf(a.fnDir, sizeof(a.fnDir), "%s", v.c_str());
     if ((v = get("RamAuto")) != "\x01") a.ramAuto = v == "1";
@@ -349,7 +363,15 @@ static void LoadSettings(App& a) {
     if ((v = get("RamHours")) != "\x01") a.ramHoursIdx = std::clamp(atoi(v.c_str()), 0, 4);
     if ((v = get("RamExclude")) != "\x01") {
         a.ramExclude.clear();
-        for (auto& e : lb::Split(v)) a.ramExclude.push_back(e);
+        std::string cur;  // ділимо лише за ";" — в іменах exe бувають пробіли
+        for (char c : v + ";") {
+            if (c == ';') {
+                if (!cur.empty()) a.ramExclude.push_back(cur);
+                cur.clear();
+            } else {
+                cur += c;
+            }
+        }
     }
     if ((v = get("Targets")) != "\x01" && !v.empty()) snprintf(a.targets, sizeof(a.targets), "%s", v.c_str());
     if ((v = get("MinimizeOnGame")) != "\x01") a.minimizeOnGame = v == "1";
@@ -511,6 +533,9 @@ static void RunTweakJob(App& a, const std::string& pending, std::function<void()
 static void StartRamClean(App& a, bool purgeStandby = true) {
     std::vector<std::string> ex = a.ramExclude;
     ex.push_back("KairoBoost.exe");
+    ex.push_back("KairoBoostPro.exe");
+    for (auto& e : game::CurrentExes()) ex.push_back(e);  // пам'ять гри і античитів не чіпаємо ніколи
+    for (auto& e : game::AntiCheatProcesses()) ex.push_back(e);
     a.ramTask.Start([&a, ex, purgeStandby] {
         lb::CleanResult r = lb::CleanMemory(ex, purgeStandby);
         a.ramLastFreed = r.freedBytes;
@@ -836,7 +861,8 @@ static std::string BestPingText(App& a) {
 // ---------------------------------------------------------------------------
 
 static void PageHomeUi(App& a) {
-    Title("Головна", "Timer Resolution, оптимізація Windows і мережі для Fortnite — в одній програмі.");
+    Title("Головна", KB_ED("Timer Resolution, оптимізація Windows і мережі для Fortnite — в одній програмі.",
+                           "Timer Resolution, оптимізація Windows і мережі для ігор — в одній програмі."));
 
     ULONG coarsest = 0, finest = 0, current = 0;
     lb::TimerQuery(coarsest, finest, current);
@@ -873,7 +899,11 @@ static void PageHomeUi(App& a) {
     ImGui::BeginDisabled(gameOn);
     ImGui::InputTextWithHint("##qexe", "FortniteClient-Win64-Shipping.exe", a.gameExe, sizeof(a.gameExe));
     ImGui::SameLine();
+#if KB_IS_SALE
+    if (ImGui::Button(game::DisplayName().c_str())) snprintf(a.gameExe, sizeof(a.gameExe), "%s", game::ExeList().c_str());
+#else
     if (ImGui::Button("Fortnite")) snprintf(a.gameExe, sizeof(a.gameExe), "%s", fn::kExe);
+#endif
     ImGui::EndDisabled();
     if (ImGui::Checkbox("Згортати KairoBoost, коли гра запущена", &a.minimizeOnGame)) SaveSettings(a);
     ImGui::SameLine(0, S(24));
@@ -914,7 +944,8 @@ static void PageHomeUi(App& a) {
     ImGui::PushStyleColor(ImGuiCol_FrameBg, kPanel2);
     ImGui::ProgressBar(frac, ImVec2(-1, S(8)), "");
     ImGui::PopStyleColor(2);
-    HelpText("Вмикає лише безпечні твіки з позначкою «рекомендовано» (зокрема для Fortnite). Решта — на сторінці "
+    HelpText(KB_ED("Вмикає лише безпечні твіки з позначкою «рекомендовано» (зокрема для Fortnite). Решта — на сторінці ",
+                   "Вмикає лише безпечні твіки з позначкою «рекомендовано» (зокрема для обраної гри). Решта — на сторінці ")
              "«Твіки». Усе можна вимкнути назад.");
     if (ImGui::Button("Порадник для мого ПК", ImVec2(S(220), S(40)))) a.page = PageAdvisor;
     ImGui::SameLine();
@@ -1150,16 +1181,111 @@ static void PageAdvisorUi(App& a) {
     }
 }
 
+// Вибір гри (редакція для продажу): застосувати до модуля game і оновити залежні частини
+static void ApplyGame(App& a, const std::string& id, bool loadPath) {
+    if (!game::Select(id)) return;
+    a.gameId = id;
+    game::SetCustomExe(a.customExe);
+    if (loadPath) {
+        // шлях для цієї гри — з налаштувань
+        std::string f = lb::GetEnv("APPDATA") + "\\KairoBoost\\settings.ini";
+        char buf[MAX_PATH] = "";
+        GetPrivateProfileStringA("KairoBoost", ("GamePath_" + id).c_str(), "", buf, sizeof(buf), f.c_str());
+        snprintf(a.gamePath, sizeof(a.gamePath), "%s", buf);
+    }
+    game::SetManualPath(a.gamePath);
+    std::string list = game::ExeList();
+    if (!list.empty()) snprintf(a.gameExe, sizeof(a.gameExe), "%s", list.c_str());
+    a.tweakStateTime = -1e9;
+    a.fnTime = -1e9;
+    a.advStarted = false;
+    a.advReady = false;
+}
+
+static std::string BrowseExe(HWND owner) {
+    char file[MAX_PATH] = "";
+    OPENFILENAMEA ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = owner;
+    ofn.lpstrFilter = "Програми (*.exe)\0*.exe\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = sizeof(file);
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    return GetOpenFileNameA(&ofn) ? std::string(file) : std::string();
+}
+
+static void GamePickerCard(App& a) {
+    BeginCard("gamepick", ImVec2(0, 0));
+    SectionTitle("Гра");
+    const auto& ps = game::Profiles();
+    int cur = 0;
+    for (int i = 0; i < (int)ps.size(); ++i)
+        if (a.gameId == ps[i].id) cur = i;
+    ImGui::SetNextItemWidth(S(320));
+    if (ImGui::BeginCombo("##game", ps[cur].name)) {
+        for (int i = 0; i < (int)ps.size(); ++i)
+            if (ImGui::Selectable(ps[i].name, i == cur)) {
+                ApplyGame(a, ps[i].id, true);
+                SaveSettings(a);
+            }
+        ImGui::EndCombo();
+    }
+    if (a.gameId == "custom") {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(S(300));
+        if (ImGui::InputTextWithHint("##cexe", "game.exe або повний шлях", a.customExe, sizeof(a.customExe)))
+            game::SetCustomExe(a.customExe);
+    }
+    ImGui::Spacing();
+    if (game::CurrentExes().empty()) {
+        Dot(kWarn);
+        ImGui::TextColored(kWarn, "Вкажи exe своєї гри (кнопка «Огляд…» або введи ім'я, напр. game.exe)");
+    } else if (!a.fnExe.empty()) {
+        Dot(kGood);
+        ImGui::TextColored(kGood, "Гру знайдено");
+        ImGui::SameLine();
+        if (a.fnRunning) Pill("гра запущена", kAccent2);
+        HelpText(a.fnExe.c_str());
+    } else {
+        Dot(kWarn);
+        ImGui::TextColored(kWarn, "Шлях до гри не знайдено автоматично");
+        HelpText("Запусти гру — KairoBoost знайде її сам, або вкажи exe кнопкою «Огляд…». Без шляху працюють пріоритет, "
+                 "QoS і режим гри; для вибору відеокарти потрібен шлях.");
+    }
+    ImGui::SetNextItemWidth(S(420));
+    ImGui::InputTextWithHint("##gpath", "Шлях до exe гри (необов'язково)", a.gamePath, sizeof(a.gamePath));
+    ImGui::SameLine();
+    if (ImGui::Button("Огляд…")) {
+        std::string f = BrowseExe(GetActiveWindow());
+        if (!f.empty()) {
+            snprintf(a.gamePath, sizeof(a.gamePath), "%s", f.c_str());
+            if (a.gameId == "custom") snprintf(a.customExe, sizeof(a.customExe), "%s", f.c_str());
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Зберегти")) {
+        if (a.gameId == "custom") game::SetCustomExe(a.customExe);
+        game::SetManualPath(a.gamePath);
+        ApplyGame(a, a.gameId, false);
+        SaveSettings(a);
+    }
+    EndCard();
+}
+
 static void PageFortniteUi(App& a) {
+#if KB_IS_SALE
+    Title("Гра", "Налаштування Windows і самої гри під обрану гру.");
+#else
     Title("Fortnite", "Налаштування Windows і самої гри саме під Fortnite.");
+#endif
     if (a.onWifi) {
         InfoBox("Ти граєш через Wi-Fi. Найбільший виграш у пінгу, джитері та втратах дає кабель (Ethernet): "
                 "Wi-Fi додає кілька-десятки мілісекунд і стрибки пінгу, які не прибере жодна програма.", kWarn);
         ImGui::Spacing();
     }
     if (ImGui::GetTime() - a.fnTime > (a.lowPower ? 30.0 : 2.0)) {
-        a.fnExe = fn::ExePath();
-        a.fnRunning = fn::IsRunning();
+        a.fnExe = game::CurrentPath();
+        a.fnRunning = game::IsRunning();
         a.onWifi = dns::OnWifi();
         a.fnSettings = fn::ReadSettings();
         if (!a.fnUiLoaded && a.fnSettings.found) {
@@ -1176,6 +1302,9 @@ static void PageFortniteUi(App& a) {
     }
 
     // --- Гра ---
+#if KB_IS_SALE
+    GamePickerCard(a);  // у версії для продажу шлях до гри задається тут (і для Fortnite теж)
+#else
     BeginCard("fngame", ImVec2(0, 0));
     if (!a.fnExe.empty()) {
         Dot(kGood);
@@ -1198,11 +1327,25 @@ static void PageFortniteUi(App& a) {
         a.tweakStateTime = -1e9;
     }
     EndCard();
+#endif
 
     // --- Твіки Fortnite ---
     ImGui::Spacing();
-    SectionTitle("Твіки для Fortnite");
+    SectionTitle((std::string("Твіки для ") + game::DisplayName()).c_str());
     TweakGrid(a, [](const tw::Tweak& t) { return t.category == tw::Fortnite; });
+
+    if (!game::IsFortnite()) {
+        // Для інших ігор — що налаштувати в самій грі
+        ImGui::Spacing();
+        BeginCard("gametips", ImVec2(0, 0));
+        SectionTitle("Налаштування в самій грі");
+        ImGui::TextWrapped("%s", game::Current().tip);
+        ImGui::Spacing();
+        HelpText("Кабель замість Wi-Fi, частота опитування миші 1000 Гц+, свіжий драйвер відеокарти — "
+                 "дають ефект у будь-якій грі.");
+        EndCard();
+        return;
+    }
 
     // --- Налаштування гри ---
     ImGui::Spacing();
@@ -1929,7 +2072,11 @@ static void PageGameUi(App& a) {
     ImGui::SetNextItemWidth(S(360));
     ImGui::InputTextWithHint("##gexe", "FortniteClient-Win64-Shipping.exe", a.gameExe, sizeof(a.gameExe));
     ImGui::SameLine();
+#if KB_IS_SALE
+    if (ImGui::Button(game::DisplayName().c_str())) snprintf(a.gameExe, sizeof(a.gameExe), "%s", game::ExeList().c_str());
+#else
     if (ImGui::Button("Fortnite")) snprintf(a.gameExe, sizeof(a.gameExe), "%s", fn::kExe);
+#endif
     ImGui::TextUnformatted("Timer Resolution");
     ImGui::SetNextItemWidth(S(360));
     ImGui::SliderFloat("##gres", &a.gameRes, 0.5f, 2.0f, "%.3f мс");
@@ -1976,7 +2123,7 @@ static void PageInfoUi(App&) {
     ImGui::TextColored(kAccent, "Чесно про пінг");
     ImGui::PopFont();
     ImGui::TextWrapped(
-        "Сервіси на кшталт ExitLag зменшують пінг, пускаючи трафік гри через свої сервери по всьому світу "
+        KB_ED("Сервіси на кшталт ExitLag зменшують пінг,", "Ігрові VPN-сервіси зменшують пінг,") " пускаючи трафік гри через свої сервери по всьому світу "
         "(кращий маршрут + дублювання пакетів). Без такої мережі серверів жодна програма на твоєму ПК не змінить "
         "маршрут пакетів в інтернеті. Тому KairoBoost не обіцяє «-50 пінгу», а робить те, що реально можна "
         "зробити локально: стабільніший FPS, менша затримка вводу, пріоритет трафіку гри у твоїй мережі і вибір "
@@ -1989,8 +2136,10 @@ static void PageInfoUi(App&) {
         "Timer Resolution — точніші таймери Windows: рівніший frametime, менша затримка вводу.",
         "Твіки Windows — пріоритети для ігор, схема живлення, енергозбереження мережі, ігрова панель тощо. "
         "Кожен вмикається окремо і відкочується назад.",
-        "Fortnite — високий пріоритет через Windows (сумісно з EasyAntiCheat), дискретна відеокарта, налаштування "
-        "FPS/VSync/режиму продуктивності, пінг до регіонів Epic.",
+        KB_ED("Fortnite — високий пріоритет через Windows (сумісно з EasyAntiCheat), дискретна відеокарта, налаштування "
+              "FPS/VSync/режиму продуктивності, пінг до регіонів Epic.",
+              "Будь-яка гра — високий пріоритет через Windows (сумісно з античитами), дискретна відеокарта, QoS, режим "
+              "гри; для Fortnite ще й налаштування FPS/VSync/режиму продуктивності і пінг до регіонів Epic."),
         "QoS DSCP 46 — пріоритет пакетів гри у твоїй мережі (Wi-Fi, роутер).",
         "Очистка ОЗУ — вручну, при запуску гри, за нестачі пам'яті або за розкладом.",
     };
@@ -2003,7 +2152,7 @@ static void PageInfoUi(App&) {
     ImGui::TextColored(kWarn, "Безпека");
     ImGui::PopFont();
     ImGui::TextWrapped(
-        "KairoBoost не втручається в пам'ять чи файли гри (окрім стандартного файлу налаштувань GameUserSettings.ini) "
+        "KairoBoost не втручається в пам'ять чи файли гри (для Fortnite — лише стандартний файл налаштувань) "
         "— тільки налаштування Windows. Усі зміни реєстру зберігаються в резервну копію; кнопка «Відкотити все» на "
         "сторінці «Твіки» повертає все як було.");
     EndCard();
@@ -2032,11 +2181,15 @@ static void DrawUi(App& a) {
     ImGui::TextColored(kAccent, "KAIRO");
     ImGui::SameLine(0, S(6));
     ImGui::TextUnformatted("BOOST");
+#if KB_IS_SALE
+    ImGui::SameLine(0, S(6));
+    ImGui::TextColored(kFortnite, "PRO");
+#endif
     ImGui::PopFont();
-    ImGui::TextColored(kMuted, "оптимізатор для Fortnite");
+    ImGui::TextColored(kMuted, KB_ED("оптимізатор для Fortnite", "оптимізатор для ігор"));
     ImGui::Dummy(ImVec2(0, S(14)));
 
-    const char* names[PageCount] = {"Головна",     "Порадник",    "Fortnite",    "Твіки",     "Timer Resolution",
+    const char* names[PageCount] = {"Головна",     "Порадник",    KB_ED("Fortnite", "Гра"),    "Твіки",     "Timer Resolution",
                                     "Очистка ОЗУ", "Тест мережі", "DNS",       "Режим гри",
                                     "Як це працює"};
     for (int i = 0; i < PageCount; ++i) {
@@ -2360,6 +2513,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     app.elevated = lb::IsElevated();
     app.build = lb::WindowsBuild();
     LoadSettings(app);
+#if KB_IS_SALE
+    ApplyGame(app, app.gameId, false);
+#endif
     fn::SetManualDir(app.fnDir);
     {
         int d, i;

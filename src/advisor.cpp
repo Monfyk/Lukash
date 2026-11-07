@@ -3,6 +3,7 @@
 #include "core.h"
 #include "dns.h"
 #include "fortnite.h"
+#include "games.h"
 #include "tweaks.h"
 
 #include <dxgi.h>
@@ -157,8 +158,8 @@ SystemInfo Collect() {
     tw::MonitorRefresh(s.refreshCur, s.refreshMax);
     s.onWifi = dns::OnWifi();
     s.build = lb::WindowsBuild();
-    s.fortniteFound = !fn::ExePath().empty();
-    fn::Settings fs = fn::ReadSettings();
+    s.fortniteFound = !game::CurrentPath().empty();  // знайдено обрану гру
+    fn::Settings fs = game::IsFortnite() ? fn::ReadSettings() : fn::Settings{};
     s.fnSettingsFound = fs.found;
     s.fnPerf = fs.performanceMode;
     s.fnVsync = fs.vsync;
@@ -246,6 +247,8 @@ static bool Available(const char* id) {
 
 std::vector<Advice> Analyze(const SystemInfo& s) {
     std::vector<Advice> v;
+    const std::string G = game::DisplayName();  // назва обраної гри
+    const bool isFn = game::IsFortnite();
     auto add = [&](Level l, std::string title, std::string text, ActionKind a = None, std::string id = "",
                    std::string page = "") { v.push_back({l, std::move(title), std::move(text), a, std::move(id), std::move(page)}); };
     // Твік: якщо ввімкнений — "уже добре", інакше — порада з кнопкою
@@ -287,7 +290,7 @@ std::vector<Advice> Analyze(const SystemInfo& s) {
         tweak("netpower", Optional, "Вимкни енергозбереження мережевої карти",
               "Мережева карта не знижуватиме швидкість і не засинатиме.");
     }
-    tweak("fn_qos", Recommended, "QoS-пріоритет для Fortnite",
+    tweak("fn_qos", Recommended, "QoS-пріоритет для " + G,
           "Роутер і Wi-Fi пропускатимуть пакети гри першими, коли вдома хтось качає чи дивиться відео.");
     tweak("throttle", Recommended, "Без обмеження мережевих пакетів", "Windows не гальмуватиме обробку пакетів.");
     if (s.physicalCores >= 6)
@@ -296,8 +299,12 @@ std::vector<Advice> Analyze(const SystemInfo& s) {
     else if (Available("netirq") && !On("netirq"))
         add(NotForYou, "Модерація переривань мережі", "На процесорі з 4 ядрами і менше краще не вимикати — "
             "навантаження на CPU зросте, а виграш мізерний.");
-    add(Optional, "Перевір регіон Fortnite",
-        "Вибери в грі регіон із найменшим пінгом — це реально знижує пінг у матчі.", OpenPage, "", "fortnite");
+    if (isFn)
+        add(Optional, "Перевір регіон Fortnite",
+            "Вибери в грі регіон із найменшим пінгом — це реально знижує пінг у матчі.", OpenPage, "", "fortnite");
+    else
+        add(Optional, "Регіон серверів у грі",
+            "Вибери в налаштуваннях гри найближчий регіон/сервер — це реально знижує пінг у матчі.");
 
     // --- Живлення / процесор ---
     if (laptop) {
@@ -321,26 +328,28 @@ std::vector<Advice> Analyze(const SystemInfo& s) {
     // --- Таймер ---
     if (lb::GlobalTimerSupported())
         tweak("globaltimer", Recommended, "Глобальний Timer Resolution",
-              "У Windows 11 без цього точний таймер KairoBoost не діє на Fortnite.");
+              "У Windows 11 без цього точний таймер KairoBoost не діє на гру.");
     else
         add(Optional, "Timer Resolution на Windows 10",
-            "На Windows 10 (2004+) точний таймер діє лише на процес, що його задав, тож на Fortnite ефект менший. "
+            "На Windows 10 (2004+) точний таймер діє лише на процес, що його задав, тож на гру ефект менший. "
             "Сама гра зазвичай і так просить точний таймер.");
 
     // --- Відеокарта ---
     if (s.Hybrid() && s.fortniteFound)
-        tweak("fn_gpu", Critical, "Fortnite на дискретній відеокарті",
+        tweak("fn_gpu", Critical, G + " на дискретній відеокарті",
               "У тебе дві відеокарти (вбудована і дискретна). Без цього Windows може запустити гру на слабкій "
               "вбудованій — FPS падає в рази.");
     else if (s.fortniteFound)
-        tweak("fn_gpu", Optional, "Fortnite на потужній відеокарті", "Гарантує, що гра завжди йде на основній відеокарті.");
+        tweak("fn_gpu", Optional, G + " на потужній відеокарті", "Гарантує, що гра завжди йде на основній відеокарті.");
     if (s.HasNvidia())
         add(Recommended, "Увімкни NVIDIA Reflex у грі",
-            "Fortnite → Налаштування → Відео → «NVIDIA Reflex» → «Увімк. + прискорення». Мінус 10–30 мс затримки вводу. "
+            (isFn ? std::string("Fortnite → Налаштування → Відео → «NVIDIA Reflex» → «Увімк. + прискорення». ")
+                  : "У налаштуваннях графіки " + G + " знайди «NVIDIA Reflex» і вибери «Увімк. + прискорення» (якщо гра підтримує). ") +
+            "Мінус 10–30 мс затримки вводу. "
             "Програма змінити це не може — тільки в грі.");
     else if (s.HasAmdDedicated())
         add(Recommended, "Увімкни AMD Anti-Lag",
-            "AMD Software → Ігри → Fortnite → Radeon Anti-Lag. Зменшує затримку вводу.");
+            "AMD Software → Ігри → " + G + " → Radeon Anti-Lag. Зменшує затримку вводу.");
     if (s.build >= 22621) tweak("winopt", Recommended, "Оптимізації для віконних ігор",
                                 "Windows 11: менша затримка, якщо граєш у «вікні без рамки».");
     if (s.HasDiscrete() && !weakGpu && s.build >= 19041)
@@ -353,7 +362,9 @@ std::vector<Advice> Analyze(const SystemInfo& s) {
           "Запис у фоні з'їдає ресурси відеокарти і диска.");
 
     // --- Fortnite: налаштування гри ---
-    if (s.fnSettingsFound) {
+    if (!isFn) {
+        add(Recommended, "Налаштування в самій грі (" + G + ")", game::Current().tip);
+    } else if (s.fnSettingsFound) {
         bool needMax = (!s.fnPerf && (weakGpu || weakCpu)) || s.fnVsync || !s.fnFullscreen;
         std::string what;
         if (!s.fnPerf && (weakGpu || weakCpu)) what += "режим продуктивності (твоєму ПК він дасть найбільший приріст FPS); ";
@@ -372,9 +383,9 @@ std::vector<Advice> Analyze(const SystemInfo& s) {
     } else if (s.fortniteFound) {
         add(Optional, "Налаштування Fortnite", "Запусти Fortnite хоча б раз — тоді порадник перевірить налаштування гри.");
     }
-    if (s.fortniteFound)
-        tweak("fn_priority", Recommended, "Високий пріоритет CPU для Fortnite",
-              "Fortnite отримує процесор першим — менше просідань FPS через фонові програми.");
+    if (!game::CurrentExes().empty())
+        tweak("fn_priority", Recommended, "Високий пріоритет CPU для " + G,
+              G + " отримує процесор першим — менше просідань FPS через фонові програми.");
     if (weakCpu)
         tweak("sysresp", Recommended, "Мінімум ресурсів для фону",
               "На процесорі з 4 ядрами і менше кожен відсоток CPU для гри помітний.");
@@ -386,7 +397,7 @@ std::vector<Advice> Analyze(const SystemInfo& s) {
     if (s.ramSpeed && s.ramRatedSpeed && s.ramSpeed + 100 < s.ramRatedSpeed) {
         snprintf(b, sizeof(b),
                  "Пам'ять працює на %d МТ/с, а модулі розраховані на %d. Увімкни XMP (Intel) або EXPO (AMD) у BIOS — "
-                 "це +5–15%% FPS у Fortnite без жодного ризику.",
+                 "це +5–15%% FPS в іграх без жодного ризику.",
                  s.ramSpeed, s.ramRatedSpeed);
         add(Critical, "Пам'ять працює повільніше, ніж може", b);
     } else if ((s.ramType == 4 && s.ramSpeed && s.ramSpeed <= 2666) || (s.ramType == 5 && s.ramSpeed && s.ramSpeed <= 4800)) {
@@ -398,7 +409,7 @@ std::vector<Advice> Analyze(const SystemInfo& s) {
     }
     if (s.ramModules == 1 && !laptop)
         add(Recommended, "Одна планка пам'яті",
-            "З одним модулем пам'ять працює в одноканальному режимі — FPS у Fortnite може бути на 10–20% нижчим. "
+            "З одним модулем пам'ять працює в одноканальному режимі — FPS в іграх може бути на 10–20% нижчим. "
             "Дві однакові планки дають двоканальний режим.");
     if (s.ramMb && s.ramMb < 12 * 1024)
         add(Recommended, "Мало оперативної пам'яті",
@@ -410,7 +421,7 @@ std::vector<Advice> Analyze(const SystemInfo& s) {
     // --- Диск ---
     if (s.diskKnown && !s.systemSsd) {
         add(Recommended, "Системний диск — HDD",
-            "Fortnite на HDD довго вантажиться і може фризити під час підвантаження карти. SSD — найкраще оновлення.");
+            "Ігри на HDD довго вантажаться і можуть фризити під час підвантаження карти. SSD — найкраще оновлення.");
         if (Available("sysmain") && !On("sysmain"))
             add(NotForYou, "Вимкнення SysMain", "На HDD SysMain пришвидшує запуск програм — не вимикай.");
     }

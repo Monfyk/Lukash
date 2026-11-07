@@ -9,7 +9,9 @@
 #include <cstring>
 
 #include "dns.h"
+#include "edition.h"
 #include "fortnite.h"
+#include "games.h"
 
 namespace tw {
 
@@ -28,7 +30,8 @@ static const char* kKernel = "SYSTEM\\CurrentControlSet\\Control\\Session Manage
 static const char* kIfeo = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options\\";
 
 const char* CategoryName(Category c) {
-    static const char* n[] = {"Мережа", "Система", "Процесор", "Відеокарта", "Миша і клавіатура", "Диск", "Fortnite"};
+    static const char* n[] = {"Мережа", "Система", "Процесор", "Відеокарта", "Миша і клавіатура", "Диск",
+                              KB_ED("Fortnite", "Гра")};
     return c < CategoryCount ? n[c] : "";
 }
 
@@ -188,8 +191,9 @@ static std::string RefreshUnavailable() {
     return "";
 }
 
+// Значення для повного шляху до exe поточної гри (налаштування графіки / сумісності Windows)
 static std::vector<RegValue> FortniteExeRegs(const char* subkey, const std::string& value) {
-    std::string exe = fn::ExePath();
+    std::string exe = game::CurrentPath();
     if (exe.empty()) return {};
     return {Sz(CU, subkey, exe, value)};
 }
@@ -392,7 +396,38 @@ static void RefreshKeyboard() {
 // Каталог
 // ---------------------------------------------------------------------------
 
-static std::string NoFortnite() { return fn::ExePath().empty() ? "Fortnite не знайдено — вкажи папку гри" : ""; }
+static std::string NoFortnite() {
+    if (game::CurrentExes().empty()) return "Вкажи exe своєї гри";
+    return game::CurrentPath().empty() ? KB_ED("Fortnite не знайдено — вкажи папку гри",
+                                               "Вкажи шлях до гри або запусти її")
+                                       : "";
+}
+
+static std::string NoGameExe() { return game::CurrentExes().empty() ? "Вкажи exe своєї гри" : ""; }
+
+static std::vector<RegValue> PriorityRegs() {
+    std::vector<RegValue> v;
+    for (auto& e : game::CurrentExes()) v.push_back(Dw(LM, std::string(kIfeo) + e + "\\PerfOptions", "CpuPriorityClass", 3));
+    return v;
+}
+
+static bool GameQosOn() {
+    auto ex = game::CurrentExes();
+    if (ex.empty()) return false;
+    for (auto& e : ex)
+        if (!lb::QosIsSet(e)) return false;
+    return true;
+}
+static bool GameQosApply() {
+    bool ok = !game::CurrentExes().empty();
+    for (auto& e : game::CurrentExes()) ok = lb::QosApply(e) && ok;
+    return ok;
+}
+static bool GameQosRemove() {
+    bool ok = true;
+    for (auto& e : game::CurrentExes()) ok = lb::QosRemove(e) && ok;
+    return ok;
+}
 
 const std::vector<Tweak>& All() {
     static const std::vector<Tweak> list = [] {
@@ -545,31 +580,31 @@ const std::vector<Tweak>& All() {
              },
              nullptr, nullptr, RefreshKeyboard});
 
-        // ---- Fortnite ----
-        add({"fn_priority", Fortnite, "Високий пріоритет CPU для Fortnite",
-             "Windows запускає Fortnite одразу з високим пріоритетом. Працює разом з EasyAntiCheat.",
-             "Якщо поряд стрімиш/записуєш — OBS може отримати менше ресурсів.", false, true, [] {
-                 return std::vector<RegValue>{
-                     Dw(LM, std::string(kIfeo) + fn::kExe + "\\PerfOptions", "CpuPriorityClass", 3)};
-             }});
-        add({"fn_gpu", Fortnite, "Fortnite на потужній відеокарті",
-             "Windows завжди запускає Fortnite на дискретній відеокарті, а не на вбудованій.",
+        // ---- Гра (у звичайній редакції — Fortnite) ----
+        add({"fn_priority", Fortnite, KB_ED("Високий пріоритет CPU для Fortnite", "Високий пріоритет CPU для гри"),
+             KB_ED("Windows запускає Fortnite одразу з високим пріоритетом. Працює разом з EasyAntiCheat.",
+                   "Windows запускає гру одразу з високим пріоритетом. Працює разом з античитами."),
+             "Якщо поряд стрімиш/записуєш — OBS може отримати менше ресурсів.", false, true, PriorityRegs, nullptr,
+             nullptr, nullptr, nullptr, NoGameExe});
+        add({"fn_gpu", Fortnite, KB_ED("Fortnite на потужній відеокарті", "Гра на потужній відеокарті"),
+             KB_ED("Windows завжди запускає Fortnite на дискретній відеокарті, а не на вбудованій.",
+                   "Windows завжди запускає гру на дискретній відеокарті, а не на вбудованій."),
              "ПК лише з однією відеокартою — нічого не змінить (але й не зашкодить).", false, true,
              [] { return FortniteExeRegs("Software\\Microsoft\\DirectX\\UserGpuPreferences", "GpuPreference=2;"); },
              nullptr, nullptr, nullptr, nullptr, NoFortnite});
-        add({"fn_fso", Fortnite, "Без оптимізації на весь екран (Fortnite)",
-             "Вимикає повноекранну оптимізацію лише для Fortnite (режим «Повноекранний» у грі).",
+        add({"fn_fso", Fortnite, KB_ED("Без оптимізації на весь екран (Fortnite)", "Без оптимізації на весь екран (гра)"),
+             KB_ED("Вимикає повноекранну оптимізацію лише для Fortnite (режим «Повноекранний» у грі).",
+                   "Вимикає повноекранну оптимізацію лише для цієї гри (режим «Повноекранний» у грі)."),
              "Граєш у «Вікні без рамки» — ефекту не буде.", false, false,
              [] {
                  return FortniteExeRegs("Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers",
                                         "~ DISABLEDXMAXIMIZEDWINDOWEDMODE");
              },
              nullptr, nullptr, nullptr, nullptr, NoFortnite});
-        add({"fn_qos", Fortnite, "QoS-пріоритет пакетів Fortnite",
+        add({"fn_qos", Fortnite, KB_ED("QoS-пріоритет пакетів Fortnite", "QoS-пріоритет пакетів гри"),
              "Пакети гри позначаються DSCP 46: Wi-Fi і роутер з QoS пропускають їх першими.",
-             "Не допоможе, якщо в мережі ніхто інший нічого не качає.", false, true, nullptr,
-             [] { return lb::QosIsSet(fn::kExe); }, [] { return lb::QosApply(fn::kExe); },
-             [] { return lb::QosRemove(fn::kExe); }});
+             "Не допоможе, якщо в мережі ніхто інший нічого не качає.", false, true, nullptr, GameQosOn, GameQosApply,
+             GameQosRemove, nullptr, NoGameExe});
         // Ці твіки підхоплюються при наступному запуску гри
         for (auto& t : v)
             for (const char* id : {"gamedvr", "fso", "winopt", "fn_priority", "fn_gpu", "fn_fso", "fn_qos"})

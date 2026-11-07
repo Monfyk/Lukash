@@ -811,10 +811,22 @@ DWORD FindProcess(const std::string& exe) {
     PROCESSENTRY32 pe{};
     pe.dwSize = sizeof(pe);
     DWORD pid = 0;
-    std::string want = ToLower(exe);
+    // Кілька імен через ";" — для ігор з різними версіями exe
+    // (ділимо лише за ";", бо в іменах бувають пробіли: "League of Legends.exe")
+    std::vector<std::string> want;
+    std::string low = ToLower(exe), cur;
+    for (char c : low + ";") {
+        if (c == ';') {
+            if (!cur.empty()) want.push_back(cur);
+            cur.clear();
+        } else {
+            cur += c;
+        }
+    }
     if (Process32First(snap, &pe)) {
         do {
-            if (ToLower(pe.szExeFile) == want) {
+            std::string name = ToLower(pe.szExeFile);
+            if (std::find(want.begin(), want.end(), name) != want.end()) {
                 pid = pe.th32ProcessID;
                 break;
             }
