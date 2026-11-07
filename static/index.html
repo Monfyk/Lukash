@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мандрівний Шукач</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>✈️ Мандрівний Шукач</h1>
+  <p class="sub">Найдешевші дати туди й назад + транспорт + житло. Знаходить і ті поїздки, що аж смішно дешеві.</p>
+</header>
+
+<main>
+  <form id="f" class="card">
+    <div class="row">
+      <label>Звідки
+        <input id="from" list="cities" value="Відень" autocomplete="off" required>
+      </label>
+      <button type="button" id="swap" title="Поміняти місцями">⇄</button>
+      <label>Куди
+        <input id="to" list="cities-to" placeholder="напр. Барселона або «Куди завгодно»" autocomplete="off">
+      </label>
+    </div>
+    <div class="row">
+      <label>Виліт не раніше<input type="date" id="start"></label>
+      <label>Виліт не пізніше<input type="date" id="end"></label>
+      <label class="sm">Ночей від<input type="number" id="nmin" min="1" max="30" value="3"></label>
+      <label class="sm">до<input type="number" id="nmax" min="1" max="30" value="7"></label>
+      <label class="sm">Людей<input type="number" id="adults" min="1" max="9" value="1"></label>
+    </div>
+    <div class="row actions">
+      <button type="submit" class="primary">🔎 Знайти найвигідніше</button>
+      <button type="button" id="anywhere">🌍 Куди завгодно, аби дешево</button>
+      <span id="mode" class="badge"></span>
+    </div>
+    <datalist id="cities"></datalist>
+    <datalist id="cities-to"></datalist>
+  </form>
+
+  <div id="msg"></div>
+  <section id="out"></section>
+</main>
+
+<footer>
+  Ціни на житло та наземний транспорт — оцінка; актуальну ціну завжди показує сайт за посиланням.
+  Живі ціни на авіаквитки — з Aviasales Data API (якщо задано токен).
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

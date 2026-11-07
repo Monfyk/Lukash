@@ -1,0 +1,67 @@
+:root{
+  --bg:#f5f6fa; --card:#ffffff; --text:#1d2230; --muted:#667085; --line:#e4e7ee;
+  --accent:#2f6fed; --accent-2:#e9f0ff; --good:#12a150; --wow:#e5484d; --wow-bg:#fff0f0;
+  --heat-lo:#1fae6a; --heat-mid:#f2c94c; --heat-hi:#e5484d;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1218; --card:#181c25; --text:#e8ebf2; --muted:#98a2b3; --line:#2a303d;
+    --accent:#6b9bff; --accent-2:#1d2840; --good:#3ccf7f; --wow:#ff6b6f; --wow-bg:#2b1719;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:28px 16px 8px;max-width:1150px;margin:0 auto}
+h1{margin:0;font-size:28px}
+.sub{color:var(--muted);margin:6px 0 0}
+main{max-width:1150px;margin:0 auto;padding:12px 16px 40px}
+footer{max-width:1150px;margin:0 auto;padding:0 16px 30px;color:var(--muted);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:14px 0}
+.row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:12px}
+.row:last-child{margin-bottom:0}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);flex:1 1 180px}
+label.sm{flex:0 1 90px}
+input{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px;min-width:0}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:9px;padding:9px 14px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+#swap{flex:0 0 auto;padding:9px 12px}
+.badge{font-size:12px;padding:4px 10px;border-radius:99px;background:var(--accent-2);color:var(--accent)}
+#msg .err{color:var(--wow);font-weight:600}
+.loading{color:var(--muted)}
+h2{font-size:19px;margin:0 0 10px}
+h3{font-size:15px;margin:14px 0 8px}
+.stats{display:flex;flex-wrap:wrap;gap:10px}
+.stat{flex:1 1 150px;background:var(--bg);border-radius:10px;padding:10px 12px}
+.stat b{display:block;font-size:22px}
+.stat span{color:var(--muted);font-size:12px}
+.heat-wrap{overflow-x:auto}
+.heat{border-collapse:separate;border-spacing:2px;font-size:11px}
+.heat th{font-weight:500;color:var(--muted);padding:2px 3px;white-space:nowrap}
+.heat td{width:30px;height:26px;text-align:center;border-radius:4px;color:#111;cursor:pointer;font-weight:600}
+.heat td.absurd{outline:2px solid var(--wow)}
+.heat td:hover{outline:2px solid var(--accent)}
+.legend{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:120px;height:10px;border-radius:5px;background:linear-gradient(90deg,var(--heat-lo),var(--heat-mid),var(--heat-hi))}
+svg text{fill:var(--muted);font-size:11px}
+.deals{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+.deal{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;position:relative}
+.deal.absurd{border-color:var(--wow);background:var(--wow-bg)}
+.deal .tag{position:absolute;top:12px;right:12px;font-size:12px;font-weight:700;padding:3px 8px;border-radius:99px;background:var(--wow);color:#fff}
+.deal .tag.great{background:var(--good)}
+.price{font-size:26px;font-weight:800}
+.price small{font-size:13px;font-weight:500;color:var(--muted)}
+.dates{font-weight:600;margin:2px 0 8px}
+.line{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px dashed var(--line)}
+.line .m{color:var(--muted);font-size:13px}
+.links{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
+.links a{font-size:12px;text-decoration:none;color:var(--accent);background:var(--accent-2);padding:4px 8px;border-radius:7px}
+.links a:hover{text-decoration:underline}
+.src{font-size:11px;color:var(--muted)}
+.dest-list .item{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:10px 0;border-top:1px solid var(--line);cursor:pointer}
+.dest-list .item:hover .nm{color:var(--accent)}
+.bar{height:8px;border-radius:4px;background:var(--accent);grid-column:1/3}
+.bar.absurd{background:var(--wow)}
+.nm{font-weight:600}
+.muted{color:var(--muted);font-size:13px}
+@media (max-width:600px){ .deals{grid-template-columns:1fr} h1{font-size:23px} }
