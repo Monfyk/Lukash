@@ -69,3 +69,17 @@ label.md{flex:0 1 220px}
 label.check{flex-direction:row;align-items:center;gap:8px;font-size:14px;color:var(--text);flex:1 1 300px;padding-bottom:9px}
 label.check input{width:18px;height:18px}
 .stars{display:inline-block;font-size:12px;font-weight:700;padding:1px 6px;border-radius:6px;background:var(--good);color:#fff;margin-left:4px}
+details{display:block;border-top:1px solid var(--line);padding-top:10px}
+summary{cursor:pointer;font-size:14px}
+.banner{border-radius:12px;padding:12px 14px;margin:12px 0;font-weight:600}
+.banner.demo{background:#fff4d6;color:#7a5200}
+.banner.real{background:var(--accent-2);color:var(--accent)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .banner.demo{background:#3a2e10;color:#ffd77a}}
+.hotel{display:grid;grid-template-columns:84px 1fr auto;gap:10px;align-items:center;padding:8px 0;border-top:1px dashed var(--line)}
+.hotel img{width:84px;height:64px;object-fit:cover;border-radius:8px;background:var(--bg)}
+.hotel .nm{font-size:14px}
+.flt{padding:6px 0;border-top:1px dashed var(--line)}
+.flt img{width:20px;height:20px;vertical-align:middle;margin-right:4px}
+.alts{font-size:12px;color:var(--muted)}
+.bars .lbl{font-size:12px;color:var(--muted)}
+.err-list{font-size:12px;color:var(--wow)}

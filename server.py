@@ -3,7 +3,9 @@
 Мандрівний Шукач — знаходить найвигідніші дати туди-назад, транспорт і житло.
 
 Запуск:  python3 server.py         → відкрий http://localhost:8000
-Ціни — оцінка (модель цін); посилання на сайти справжні, точну ціну показує сайт.
+СПРАВЖНІ ціни й рейтинги: Google Flights + Google Hotels через SerpApi (serpapi.com, 250 безкоштовних запитів/міс).
+Ключ: змінна SERPAPI_KEY, файл serpapi_key.txt поруч із server.py, або поле «Ключ» на сторінці.
+Без ключа працює лише ДЕМО-режим із вигаданими цінами (позначений на сторінці).
 Без російських сервісів.
 
 Лише стандартна бібліотека Python 3.8+, нічого встановлювати не треба.
@@ -18,9 +20,22 @@ from datetime import date, datetime, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 from cities import BY_CODE, find_city
+import real
 
 PORT = int(os.environ.get("PORT", "8000"))
-STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+HERE = os.path.dirname(os.path.abspath(__file__))
+STATIC = os.path.join(HERE, "static")
+
+
+def server_key() -> str:
+    k = os.environ.get("SERPAPI_KEY", "").strip()
+    if not k:
+        try:
+            with open(os.path.join(HERE, "serpapi_key.txt"), encoding="utf-8") as f:
+                k = f.read().strip()
+        except OSError:
+            pass
+    return k
 
 
 # ───────────────────────── допоміжне ─────────────────────────
@@ -239,6 +254,58 @@ def search_anywhere(o, start, end, nmin, nmax, adults, min_rating=8.0, no_hostel
     return {"origin": o, "results": out[:30], "adults": adults, "min_rating": min_rating}
 
 
+
+# ───────────────────────── справжні ціни (SerpApi) ─────────────────────────
+def booking_hotel_link(name, d, cin, cout, adults):
+    q = urllib.parse.quote(f"{name}, {d['en']}")
+    return f"https://www.booking.com/searchresults.html?ss={q}&checkin={cin}&checkout={cout}&group_adults={adults}&no_rooms=1"
+
+
+def search_real(o, d, start, end, nmin, nmax, adults, min_rating, no_hostels, stay_kind, checks, key):
+    dist = km(o, d)
+    res = real.real_search(o, d, start, end, nmin, nmax, adults, min_rating, no_hostels, stay_kind, checks, key,
+                           skip_flights=dist < 400)
+    for c in res:
+        dep, ret = date.fromisoformat(c["dep"]), date.fromisoformat(c["ret"])
+        fl = links_flight(o, d, dep, ret, adults)
+        if c.get("flights_url"):
+            fl.insert(0, {"site": "Google Flights (ця ціна)", "url": c["flights_url"]})
+        c["links"] = {
+            "flight": fl,
+            "ground": links_ground(o, d, dep, adults) if dist < 1300 or c["ground_only"] else [],
+            "ground_back": links_ground(d, o, ret, adults) if dist < 1300 or c["ground_only"] else [],
+            "stay": links_stay(d, dep, ret, adults, min_rating, no_hostels),
+        }
+        for h in ([c["stay"]] if c["stay"] else []) + c["stay_alts"]:
+            h["booking"] = booking_hotel_link(h["name"], d, dep, ret, adults)
+    ok = [c for c in res if c["total"] is not None]
+    ok.sort(key=lambda c: c["total"])
+    return {
+        "mode": "real", "origin": o, "destination": d, "distance_km": round(dist), "adults": adults,
+        "min_rating": min_rating, "no_hostels": no_hostels, "stay_kind": stay_kind,
+        "checked": sorted(res, key=lambda c: c["dep"]), "best": ok,
+        "errors": sorted({e for c in res for e in c["errors"]}),
+    }
+
+
+def search_anywhere_real(o, start, end, nmin, nmax, adults, min_rating, no_hostels, stay_kind, n, key):
+    """Модель лише відбирає n потенційно дешевих напрямків — ціни потім перевіряються по-справжньому."""
+    pre = [r for r in search_anywhere(o, start, end, nmin, nmax, adults, min_rating, no_hostels)["results"]
+           if r["distance_km"] >= 400][:n]
+
+    def one(r):
+        b = r["best"]
+        return r["destination"], real.check_pair(o, r["destination"], date.fromisoformat(b["dep"]), b["nights"], adults,
+                                                 min_rating, no_hostels, stay_kind, key)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        res = list(ex.map(one, pre))
+    out = [{"destination": d, "best": c} for d, c in res if c["total"] is not None]
+    out.sort(key=lambda x: x["best"]["total"])
+    return {"mode": "real", "origin": o, "results": out, "adults": adults, "min_rating": min_rating,
+            "errors": sorted({e for _, c in res for e in c["errors"]})}
+
+
 # ───────────────────────── HTTP ─────────────────────────
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
@@ -260,6 +327,15 @@ class Handler(SimpleHTTPRequestHandler):
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
         if u.path == "/api/cities":
             return self.send_json(sorted(BY_CODE.values(), key=lambda c: c["name"]))
+        key = (self.headers.get("X-Serpapi-Key") or "").strip() or server_key()
+        if u.path == "/api/status":
+            st = {"has_key": bool(key)}
+            if key:
+                try:
+                    st["account"] = real.account(key)
+                except Exception as e:  # noqa
+                    st["key_error"] = str(e)
+            return self.send_json(st)
         if u.path == "/api/search":
             try:
                 o = find_city(q.get("from", "VIE"))
@@ -276,14 +352,21 @@ class Handler(SimpleHTTPRequestHandler):
                 min_rating = max(0.0, min(float(q.get("rating", 8)), 9.5))
                 no_hostels = q.get("nohostel", "1") != "0"
                 extra = (min_rating, no_hostels)
+                stay_kind = q.get("stay", "both") if q.get("stay") in ("hotel", "apartment", "both") else "both"
+                checks = max(1, min(int(q.get("checks", 4)), 10))
+                use_real = bool(key) and q.get("demo") != "1"
                 to = q.get("to", "").strip()
                 if not to or to.lower() in ("any", "куди завгодно", "*"):
+                    if use_real:
+                        return self.send_json(search_anywhere_real(o, start, end, nmin, nmax, adults, *extra, stay_kind, checks, key))
                     return self.send_json(search_anywhere(o, start, end, nmin, nmax, adults, *extra))
                 d = find_city(to)
                 if not d:
                     return self.send_json({"error": f"Не знаю місто «{to}». Вибери зі списку."}, 400)
                 if d["code"] == o["code"]:
                     return self.send_json({"error": "Звідки і куди — одне й те саме місто 🙂"}, 400)
+                if use_real:
+                    return self.send_json(search_real(o, d, start, end, nmin, nmax, adults, *extra, stay_kind, checks, key))
                 return self.send_json(search(o, d, start, end, nmin, nmax, adults, True, *extra))
             except Exception as e:  # noqa
                 return self.send_json({"error": f"Помилка: {e}"}, 500)
@@ -292,4 +375,5 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"✈  Мандрівний Шукач: http://localhost:{PORT}")
+    print("   Ключ SerpApi:", "знайдено — СПРАВЖНІ ціни" if server_key() else "немає (можна ввести на сторінці), інакше ДЕМО-режим")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

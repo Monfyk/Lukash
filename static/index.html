@@ -39,8 +39,31 @@
           <option value="9">★ 9+ (супер)</option>
         </select>
       </label>
-      <label class="check"><input type="checkbox" id="nohostel" checked> Без хостелів — лише окремі апартаменти чи номер у готелі</label>
+      <label class="md">Житло
+        <select id="stay">
+          <option value="both" selected>Готелі + апартаменти</option>
+          <option value="hotel">Лише готелі</option>
+          <option value="apartment">Лише апартаменти</option>
+        </select>
+      </label>
+      <label class="md">Скільки варіантів дат перевірити
+        <select id="checks">
+          <option value="3">3 (економно)</option>
+          <option value="4" selected>4</option>
+          <option value="6">6</option>
+          <option value="8">8 (ретельно)</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="nohostel" checked> Без хостелів</label>
     </div>
+    <details id="keybox" class="row">
+      <summary>🔑 Ключ SerpApi для справжніх цін <span id="keystate" class="muted"></span></summary>
+      <p class="muted">Безкоштовно: зареєструйся на <a href="https://serpapi.com/users/sign_up" target="_blank" rel="noopener">serpapi.com</a>
+        (250 запитів/міс), скопіюй «Private API Key» з <a href="https://serpapi.com/manage-api-key" target="_blank" rel="noopener">serpapi.com/manage-api-key</a> і встав сюди.
+        Ключ зберігається лише в цьому браузері й іде тільки на твій локальний сервер.</p>
+      <div class="row"><input id="key" type="password" placeholder="встав ключ" autocomplete="off" style="flex:1">
+        <button type="button" id="savekey">Зберегти</button><button type="button" id="delkey">Видалити</button></div>
+    </details>
     <div class="row actions">
       <button type="submit" class="primary">🔎 Знайти найвигідніше</button>
       <button type="button" id="anywhere">🌍 Куди завгодно, аби дешево</button>
@@ -55,7 +78,8 @@
 </main>
 
 <footer>
-  Усі ціни в програмі — оцінка; актуальну ціну завжди показує сайт за посиланням. Без російських сервісів.
+  Справжні ціни й рейтинги — з Google Flights і Google Hotels (через SerpApi). Купуєш на сайті за посиланням — ціна там може трохи відрізнятися.
+  Без ключа — ДЕМО з вигаданими цінами. Без російських сервісів.
 </footer>
 <script src="app.js"></script>
 </body>

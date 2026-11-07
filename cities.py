@@ -71,10 +71,29 @@ CITIES = [
     ("MLE", "Мальдіви", "Male", "Мальдіви", 4.18, 73.51, 110, False),
 ]
 
+# Кілька аеропортів одного міста — шукаємо по всіх одразу (лоукости часто літають у другорядні)
+AIRPORTS = {
+    "VIE": "VIE,BTS",          # Відень + Братислава (60 км, Ryanair/Wizz)
+    "LHR": "LHR,LGW,STN,LTN",
+    "CDG": "CDG,ORY,BVA",
+    "FCO": "FCO,CIA",
+    "MXP": "MXP,LIN,BGY",
+    "VCE": "VCE,TSF",
+    "BER": "BER",
+    "STO": "ARN,BMA,NYO",
+    "OSL": "OSL,TRF",
+    "TYO": "HND,NRT",
+    "JFK": "JFK,EWR,LGA",
+    "BCN": "BCN,GRO",
+    "TFS": "TFS,TFN",
+    "MLA": "MLA",
+}
+
 BY_CODE = {
     c[0]: {
         "code": c[0], "name": c[1], "en": c[2], "country": c[3],
         "lat": c[4], "lon": c[5], "hotel": c[6], "lowcost": c[7],
+        "airports": AIRPORTS.get(c[0], c[0]),
     }
     for c in CITIES
 }
