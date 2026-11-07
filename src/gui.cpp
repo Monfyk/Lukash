@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -79,16 +80,63 @@ static void HideWindow(HWND hwnd, bool toTray);
 // Кольори та шрифти
 // ---------------------------------------------------------------------------
 
-static const ImVec4 kBg = ImVec4(0.055f, 0.063f, 0.086f, 1.0f);
-static const ImVec4 kPanel = ImVec4(0.086f, 0.098f, 0.133f, 1.0f);
-static const ImVec4 kPanel2 = ImVec4(0.118f, 0.133f, 0.180f, 1.0f);
-static const ImVec4 kAccent = ImVec4(1.000f, 0.420f, 0.169f, 1.0f);   // помаранчевий
-static const ImVec4 kAccent2 = ImVec4(0.169f, 0.784f, 1.000f, 1.0f);  // блакитний
-static const ImVec4 kGood = ImVec4(0.290f, 0.871f, 0.502f, 1.0f);
-static const ImVec4 kWarn = ImVec4(1.000f, 0.780f, 0.250f, 1.0f);
-static const ImVec4 kBad = ImVec4(1.000f, 0.330f, 0.330f, 1.0f);
-static const ImVec4 kMuted = ImVec4(0.560f, 0.600f, 0.680f, 1.0f);
-static const ImVec4 kFortnite = ImVec4(0.659f, 0.443f, 1.000f, 1.0f);  // фіолетовий
+// Палітра — змінюється темою в налаштуваннях (ApplyTheme)
+static ImVec4 kBg, kPanel, kPanel2, kAccent, kAccent2, kGood, kWarn, kBad, kMuted, kFortnite;
+static ImVec4 kText, kLogBg, kToggleOff, kOnAccent;  // основний текст, фон журналу, вимкнений перемикач, текст на кнопці
+static bool g_lightTheme = false;
+static float g_ui = 1.0f;      // масштаб інтерфейсу
+static float g_round = 10.0f;  // заокруглення кутів
+static bool g_styleDirty = false;
+
+enum Theme { ThemeDark, ThemeOled, ThemeLight, ThemeCount };
+
+static void ApplyTheme(int theme, ImVec4 accent) {
+    g_lightTheme = theme == ThemeLight;
+    kAccent = accent;
+    if (theme == ThemeLight) {
+        kBg = ImVec4(0.945f, 0.950f, 0.965f, 1);
+        kPanel = ImVec4(1.0f, 1.0f, 1.0f, 1);
+        kPanel2 = ImVec4(0.900f, 0.910f, 0.930f, 1);
+        kText = ImVec4(0.100f, 0.110f, 0.135f, 1);
+        kMuted = ImVec4(0.400f, 0.430f, 0.490f, 1);
+        kLogBg = ImVec4(0.915f, 0.922f, 0.940f, 1);
+        kToggleOff = ImVec4(0.760f, 0.775f, 0.810f, 1);
+        kAccent2 = ImVec4(0.000f, 0.520f, 0.820f, 1);
+        kGood = ImVec4(0.090f, 0.600f, 0.300f, 1);
+        kWarn = ImVec4(0.780f, 0.520f, 0.000f, 1);
+        kBad = ImVec4(0.850f, 0.200f, 0.200f, 1);
+        kFortnite = ImVec4(0.500f, 0.300f, 0.900f, 1);
+    } else {
+        bool oled = theme == ThemeOled;
+        kBg = oled ? ImVec4(0, 0, 0, 1) : ImVec4(0.055f, 0.063f, 0.086f, 1);
+        kPanel = oled ? ImVec4(0.045f, 0.045f, 0.050f, 1) : ImVec4(0.086f, 0.098f, 0.133f, 1);
+        kPanel2 = oled ? ImVec4(0.090f, 0.090f, 0.100f, 1) : ImVec4(0.118f, 0.133f, 0.180f, 1);
+        kText = ImVec4(0.850f, 0.870f, 0.920f, 1);
+        kMuted = ImVec4(0.560f, 0.600f, 0.680f, 1);
+        kLogBg = oled ? ImVec4(0, 0, 0, 1) : ImVec4(0.040f, 0.045f, 0.062f, 1);
+        kToggleOff = ImVec4(0.220f, 0.240f, 0.300f, 1);
+        kAccent2 = ImVec4(0.169f, 0.784f, 1.000f, 1);
+        kGood = ImVec4(0.290f, 0.871f, 0.502f, 1);
+        kWarn = ImVec4(1.000f, 0.780f, 0.250f, 1);
+        kBad = ImVec4(1.000f, 0.330f, 0.330f, 1);
+        kFortnite = ImVec4(0.659f, 0.443f, 1.000f, 1);
+    }
+    // Текст на кольоровій кнопці: темний на світлому акценті, білий на темному
+    float lum = 0.299f * accent.x + 0.587f * accent.y + 0.114f * accent.z;
+    kOnAccent = lum > 0.55f ? ImVec4(0.05f, 0.05f, 0.07f, 1) : ImVec4(1, 1, 1, 1);
+    g_styleDirty = true;
+}
+
+struct AccentPreset {
+    const char* name;
+    ImVec4 color;
+};
+static const AccentPreset kAccents[] = {
+    {"Помаранчевий", ImVec4(1.000f, 0.420f, 0.169f, 1)}, {"Червоний", ImVec4(0.930f, 0.230f, 0.300f, 1)},
+    {"Рожевий", ImVec4(0.950f, 0.350f, 0.700f, 1)},      {"Фіолетовий", ImVec4(0.600f, 0.400f, 1.000f, 1)},
+    {"Синій", ImVec4(0.250f, 0.520f, 1.000f, 1)},        {"Блакитний", ImVec4(0.150f, 0.780f, 0.950f, 1)},
+    {"Зелений", ImVec4(0.200f, 0.820f, 0.450f, 1)},      {"Жовтий", ImVec4(1.000f, 0.780f, 0.150f, 1)},
+};
 
 static ImFont* g_fontBody = nullptr;
 static ImFont* g_fontBold = nullptr;
@@ -176,7 +224,7 @@ struct LiveTarget {
     }
 };
 
-enum Page { PageHome, PageAdvisor, PageFortnite, PageTweaks, PageTimer, PageRam, PageNet, PageDns, PageGame, PageInfo, PageCount };
+enum Page { PageHome, PageAdvisor, PageFortnite, PageTweaks, PageTimer, PageRam, PageNet, PageDns, PageGame, PageInfo, PageSettings, PageCount };
 
 struct DnsRow {
     int provider = -1;  // -1 = поточний DNS від провайдера
@@ -274,6 +322,15 @@ struct App {
     std::atomic<bool> ramRequest{false};  // запит на очистку з потоку режиму гри
 
     bool minimizeOnGame = true;  // згортати вікно, коли гра запущена
+    // Вигляд і поведінка (сторінка «Налаштування»)
+    int theme = ThemeDark;
+    int accentIdx = 0;  // -1 — свій колір
+    float accentCustom[3] = {1.0f, 0.42f, 0.169f};
+    float uiScale = 1.0f;
+    float rounding = 10.0f;
+    bool autoBoost = false;
+    int autostart = -1;  // -1 — ще не перевіряли
+    Page prevPage = PageHome;
     bool closeToTray = true;     // хрестик ховає програму в трей
     bool trayHintShown = false;
 
@@ -339,6 +396,14 @@ static void SaveSettings(const App& a) {
     put("KeyDelay", std::to_string(a.kbDelay));
     put("KeyInterval", std::to_string(a.kbInterval));
     put("CloseToTray", a.closeToTray ? "1" : "0");
+    put("Theme", std::to_string(a.theme));
+    put("Accent", std::to_string(a.accentIdx));
+    char ac[64];
+    snprintf(ac, sizeof(ac), "%.3f %.3f %.3f", a.accentCustom[0], a.accentCustom[1], a.accentCustom[2]);
+    put("AccentCustom", ac);
+    put("UiScale", std::to_string(a.uiScale));
+    put("Rounding", std::to_string(a.rounding));
+    put("AutoBoost", a.autoBoost ? "1" : "0");
     put("TrayHintShown", a.trayHintShown ? "1" : "0");
 }
 
@@ -378,6 +443,13 @@ static void LoadSettings(App& a) {
     if ((v = get("KeyDelay")) != "\x01") a.kbDelay = std::clamp(atoi(v.c_str()), 100, 1000);
     if ((v = get("KeyInterval")) != "\x01") a.kbInterval = std::clamp(atoi(v.c_str()), 5, 500);
     if ((v = get("CloseToTray")) != "\x01") a.closeToTray = v == "1";
+    if ((v = get("Theme")) != "\x01") a.theme = std::clamp(atoi(v.c_str()), 0, (int)ThemeCount - 1);
+    if ((v = get("Accent")) != "\x01") a.accentIdx = std::clamp(atoi(v.c_str()), -1, (int)IM_ARRAYSIZE(kAccents) - 1);
+    if ((v = get("AccentCustom")) != "\x01")
+        sscanf(v.c_str(), "%f %f %f", &a.accentCustom[0], &a.accentCustom[1], &a.accentCustom[2]);
+    if ((v = get("UiScale")) != "\x01") a.uiScale = std::clamp((float)atof(v.c_str()), 0.8f, 1.4f);
+    if ((v = get("Rounding")) != "\x01") a.rounding = std::clamp((float)atof(v.c_str()), 0.0f, 16.0f);
+    if ((v = get("AutoBoost")) != "\x01") a.autoBoost = v == "1";
     if ((v = get("TrayHintShown")) != "\x01") a.trayHintShown = v == "1";
 }
 
@@ -385,7 +457,7 @@ static void LoadSettings(App& a) {
 // Дрібні віджети
 // ---------------------------------------------------------------------------
 
-static float S(float v) { return v * g_dpi; }
+static float S(float v) { return v * g_dpi * g_ui; }
 
 static bool AccentButton(const char* label, ImVec2 size, ImVec4 color = kAccent) {
     ImGui::PushStyleColor(ImGuiCol_Button, color);
@@ -393,7 +465,8 @@ static bool AccentButton(const char* label, ImVec2 size, ImVec4 color = kAccent)
                                                           std::min(color.y + 0.08f, 1.f),
                                                           std::min(color.z + 0.08f, 1.f), 1));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, Fade(color, 0.8f));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.05f, 0.05f, 0.07f, 1));
+    float lum = 0.299f * color.x + 0.587f * color.y + 0.114f * color.z;
+    ImGui::PushStyleColor(ImGuiCol_Text, lum > 0.55f ? ImVec4(0.05f, 0.05f, 0.07f, 1) : ImVec4(1, 1, 1, 1));
     bool r = ImGui::Button(label, size);
     ImGui::PopStyleColor(4);
     return r;
@@ -427,7 +500,7 @@ static bool Toggle(const char* id, bool on, bool busy) {
     bool clicked = ImGui::InvisibleButton(id, ImVec2(w, h));
     bool hovered = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec4 bg = on ? kGood : ImVec4(0.22f, 0.24f, 0.30f, 1);
+    ImVec4 bg = on ? kGood : kToggleOff;
     if (hovered) bg = Fade(bg, 0.85f);
     dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(bg), h * 0.5f);
     float r = h * 0.5f - S(3);
@@ -456,7 +529,7 @@ static void SectionTitle(const char* text) {
 
 static bool BeginCard(const char* id, ImVec2 size) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, kPanel);
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(10));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, g_round * g_dpi * g_ui);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(S(16), S(14)));
     return ImGui::BeginChild(id, size,
                              ImGuiChildFlags_Borders | (size.y == 0 ? ImGuiChildFlags_AutoResizeY : 0),
@@ -722,7 +795,7 @@ static void TweakCard(App& a, size_t idx, float width) {
     } else if (pending) {
         ImGui::TextColored(kAccent2, "Застосовую...");
     } else {
-        ImGui::TextColored(ImVec4(0.85f, 0.87f, 0.92f, 1), "Коли не варто?");
+        ImGui::TextColored(kText, "Коли не варто?");
         if (ImGui::IsItemHovered()) {
             ImGui::BeginTooltip();
             ImGui::PushTextWrapPos(S(320));
@@ -1554,7 +1627,7 @@ static void PageTweaksUi(App& a) {
     auto chip = [&](const char* label, int value) {
         bool sel = a.tweakFilter == value;
         ImGui::PushStyleColor(ImGuiCol_Button, sel ? Fade(kAccent, 0.25f) : kPanel);
-        ImGui::PushStyleColor(ImGuiCol_Text, sel ? kAccent : ImVec4(0.85f, 0.87f, 0.92f, 1));
+        ImGui::PushStyleColor(ImGuiCol_Text, sel ? kAccent : kText);
         if (ImGui::Button(label)) a.tweakFilter = value;
         ImGui::PopStyleColor(2);
         ImGui::SameLine();
@@ -1990,13 +2063,13 @@ static void PageDnsUi(App& a) {
         // Номер
         ImVec2 p = ImGui::GetCursorScreenPos();
         float box = S(34);
-        ImGui::GetWindowDrawList()->AddRect(p, ImVec2(p.x + box, p.y + box), ImGui::GetColorU32(ImVec4(1, 1, 1, 0.12f)),
+        ImGui::GetWindowDrawList()->AddRect(p, ImVec2(p.x + box, p.y + box), ImGui::GetColorU32(Fade(kText, 0.15f)),
                                             S(8));
         char num[8];
         snprintf(num, sizeof(num), "%d", rank);
         ImVec2 ts = ImGui::CalcTextSize(num);
         ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + (box - ts.x) / 2, p.y + (box - ts.y) / 2),
-                                            ImGui::GetColorU32(ImVec4(0.85f, 0.87f, 0.92f, 1)), num);
+                                            ImGui::GetColorU32(kText), num);
         ImGui::Dummy(ImVec2(box, box));
         ImGui::SameLine(0, S(14));
         // Назва, адреси, примітка
@@ -2009,7 +2082,7 @@ static void PageDnsUi(App& a) {
         bool isCurrent = (r.provider >= 0 && r.provider == a.dnsCurrent) || (r.provider < 0 && a.dnsCurrent < 0);
         if (isCurrent) {
             ImGui::SameLine();
-            Pill("поточний", ImVec4(0.85f, 0.87f, 0.92f, 1));
+            Pill("поточний", kText);
         }
         if (i == fastest && allDone) {
             ImGui::SameLine();
@@ -2159,6 +2232,306 @@ static void PageInfoUi(App&) {
 }
 
 // ---------------------------------------------------------------------------
+// Налаштування
+// ---------------------------------------------------------------------------
+
+static ImVec4 CurrentAccent(const App& a) {
+    if (a.accentIdx >= 0) return kAccents[a.accentIdx].color;
+    return ImVec4(a.accentCustom[0], a.accentCustom[1], a.accentCustom[2], 1);
+}
+
+static void ApplyLook(App& a) {
+    g_ui = a.uiScale;
+    g_round = a.rounding;
+    ApplyTheme(a.theme, CurrentAccent(a));
+}
+
+// Автозапуск через Планувальник завдань: програма потребує прав адміністратора, а звичайний
+// автозапуск (ключ Run) такі програми мовчки пропускає.
+static std::string TaskName() { return KB_ED("KairoBoost", "KairoBoostPro"); }
+
+static bool AutostartEnabled() {
+    std::string out = lb::RunCapture(("schtasks.exe /Query /TN " + TaskName()).c_str());
+    return out.find(TaskName()) != std::string::npos;
+}
+
+static std::string XmlEscape(const std::string& v) {
+    std::string r;
+    for (char c : v) {
+        if (c == '&') r += "&amp;";
+        else if (c == '<') r += "&lt;";
+        else if (c == '>') r += "&gt;";
+        else r += c;
+    }
+    return r;
+}
+
+static bool SetAutostart(bool on) {
+    if (!on) {
+        lb::RunHidden(("schtasks.exe /Delete /TN " + TaskName() + " /F").c_str());
+        return !AutostartEnabled();
+    }
+    wchar_t exeW[MAX_PATH];
+    GetModuleFileNameW(nullptr, exeW, MAX_PATH);
+    int n = WideCharToMultiByte(CP_UTF8, 0, exeW, -1, nullptr, 0, nullptr, nullptr);
+    std::string exe(n - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, exeW, -1, &exe[0], n, nullptr, nullptr);
+    std::string user = lb::GetEnv("USERDOMAIN") + "\\" + lb::GetEnv("USERNAME");
+    // Без обмежень за часом і живленням (стандартні налаштування schtasks зупиняли б програму через 72 год
+    // і не запускали б її на ноутбуці від батареї)
+    std::string xml =
+        "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n"
+        "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n"
+        "  <RegistrationInfo><Description>KairoBoost — автозапуск</Description></RegistrationInfo>\n"
+        "  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + XmlEscape(user) + "</UserId></LogonTrigger></Triggers>\n"
+        "  <Principals><Principal id=\"Author\"><UserId>" + XmlEscape(user) +
+        "</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\n"
+        "  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
+        "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"
+        "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit><StartWhenAvailable>true</StartWhenAvailable><Priority>7</Priority></Settings>\n"
+        "  <Actions Context=\"Author\"><Exec><Command>" + XmlEscape(exe) + "</Command><Arguments>--tray</Arguments></Exec></Actions>\n"
+        "</Task>\n";
+    // Файл завдання — у UTF-16, як очікує Планувальник
+    int wn = MultiByteToWideChar(CP_UTF8, 0, xml.c_str(), -1, nullptr, 0);
+    std::wstring wxml(wn - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, xml.c_str(), -1, &wxml[0], wn);
+    std::string file = lb::GetEnv("TEMP") + "\\kairoboost_task.xml";
+    if (FILE* f = fopen(file.c_str(), "wb")) {
+        unsigned char bom[2] = {0xFF, 0xFE};
+        fwrite(bom, 1, 2, f);
+        fwrite(wxml.data(), sizeof(wchar_t), wxml.size(), f);
+        fclose(f);
+    }
+    lb::RunHidden(("schtasks.exe /Create /TN " + TaskName() + " /XML \"" + file + "\" /F").c_str());
+    DeleteFileA(file.c_str());
+    return AutostartEnabled();
+}
+
+// Рядок налаштування: назва, опис і перемикач праворуч
+static bool SettingRow(const char* id, const char* label, const char* desc, bool on, bool busy = false) {
+    ImGui::PushID(id);
+    float right = ImGui::GetContentRegionMax().x;
+    ImGui::BeginGroup();
+    ImGui::PushFont(g_fontBold);
+    ImGui::TextUnformatted(label);
+    ImGui::PopFont();
+    ImGui::PushTextWrapPos(right - S(70));
+    ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
+    ImGui::TextWrapped("%s", desc);
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+    ImGui::EndGroup();
+    float y = ImGui::GetItemRectMin().y;
+    ImGui::SameLine(right - S(46));
+    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, y + S(4)));
+    ImGui::BeginDisabled(busy);
+    bool clicked = Toggle("##tg", on, busy);
+    ImGui::EndDisabled();
+    ImGui::PopID();
+    ImGui::Spacing();
+    return clicked;
+}
+
+// Кнопка-варіант (вибраний — підсвічений акцентом)
+static bool Choice(const char* label, bool selected, ImVec2 size = ImVec2(0, 0)) {
+    ImGui::PushStyleColor(ImGuiCol_Button, selected ? Fade(kAccent, 0.22f) : kPanel2);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Fade(kAccent, selected ? 0.30f : 0.12f));
+    ImGui::PushStyleColor(ImGuiCol_Text, selected ? kAccent : kText);
+    bool r = ImGui::Button(label, size);
+    ImGui::PopStyleColor(3);
+    return r;
+}
+
+static void PageSettingsUi(App& a) {
+    Title("Налаштування", "Вигляд програми, автозапуск і поведінка.");
+    if (a.autostart < 0) a.autostart = AutostartEnabled() ? 1 : 0;
+    bool changed = false;
+
+    // --- Вигляд ---
+    BeginCard("look", ImVec2(0, 0));
+    SectionTitle("Вигляд");
+    ImGui::TextColored(kMuted, "Тема");
+    const char* themes[] = {"Темна", "Чорна (OLED)", "Світла"};
+    for (int i = 0; i < ThemeCount; ++i) {
+        if (i) ImGui::SameLine();
+        if (Choice(themes[i], a.theme == i, ImVec2(S(150), S(36)))) {
+            a.theme = i;
+            changed = true;
+        }
+    }
+    ImGui::Spacing();
+    ImGui::TextColored(kMuted, "Колір акценту");
+    for (int i = 0; i < (int)IM_ARRAYSIZE(kAccents); ++i) {
+        if (i) ImGui::SameLine();
+        ImGui::PushID(i);
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float sz = S(34);
+        if (ImGui::InvisibleButton("##ac", ImVec2(sz, sz))) {
+            a.accentIdx = i;
+            changed = true;
+        }
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 c(p.x + sz / 2, p.y + sz / 2);
+        dl->AddCircleFilled(c, sz * 0.40f, ImGui::GetColorU32(kAccents[i].color));
+        if (a.accentIdx == i) dl->AddCircle(c, sz * 0.49f, ImGui::GetColorU32(kText), 0, S(2));
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", kAccents[i].name);
+        ImGui::PopID();
+    }
+    ImGui::SameLine(0, S(18));
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(kMuted, "Свій:");
+    ImGui::SameLine();
+    if (ImGui::ColorEdit3("##custom", a.accentCustom, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
+        a.accentIdx = -1;
+        changed = true;
+    }
+    ImGui::Spacing();
+    ImGui::TextColored(kMuted, "Розмір інтерфейсу");
+    const float scales[] = {0.9f, 1.0f, 1.1f, 1.25f};
+    const char* scaleNames[] = {"90%", "100%", "110%", "125%"};
+    for (int i = 0; i < 4; ++i) {
+        if (i) ImGui::SameLine();
+        if (Choice(scaleNames[i], std::fabs(a.uiScale - scales[i]) < 0.01f, ImVec2(S(80), S(34)))) {
+            a.uiScale = scales[i];
+            changed = true;
+        }
+    }
+    ImGui::Spacing();
+    ImGui::TextColored(kMuted, "Заокруглення кутів");
+    ImGui::SetNextItemWidth(S(330));
+    if (ImGui::SliderFloat("##round", &a.rounding, 0.0f, 16.0f, "%.0f")) changed = true;
+    ImGui::Spacing();
+    if (ImGui::Button("Скинути вигляд", ImVec2(S(180), S(34)))) {
+        a.theme = ThemeDark;
+        a.accentIdx = 0;
+        a.uiScale = 1.0f;
+        a.rounding = 10.0f;
+        changed = true;
+    }
+    EndCard();
+
+    // --- Програма ---
+    ImGui::Spacing();
+    BeginCard("behav", ImVec2(0, 0));
+    SectionTitle("Програма");
+    if (SettingRow("auto", "Запускати разом з Windows",
+                   "KairoBoost стартує при вході в систему, одразу в треї, без запиту прав адміністратора.",
+                   a.autostart == 1, a.tweakTask.running)) {
+        bool want = a.autostart != 1;
+        RunTweakJob(a, "autostart", [&a, want] {
+            bool ok = SetAutostart(want) == want;
+            a.autostart = -1;  // перечитати
+            lb::Log("[%s] Автозапуск %s", ok ? "OK" : "ПОМИЛКА", want ? "увімкнено" : "вимкнено");
+        });
+    }
+    if (SettingRow("boost", "Вмикати БУСТ при запуску програми",
+                   "Режим гри стартує сам і чекає на гру. Разом з автозапуском — нічого не треба натискати перед грою.",
+                   a.autoBoost)) {
+        a.autoBoost = !a.autoBoost;
+        SaveSettings(a);
+    }
+    if (SettingRow("min", "Ховати KairoBoost, коли гра запущена",
+                   "Вікно не малюється під час гри — програма майже не використовує ресурси.", a.minimizeOnGame)) {
+        a.minimizeOnGame = !a.minimizeOnGame;
+        SaveSettings(a);
+    }
+    if (SettingRow("tray", "Хрестик ховає програму в трей",
+                   "Закриття вікна не вимикає буст. Повністю вийти — правою кнопкою по значку в треї → «Вихід».",
+                   a.closeToTray)) {
+        a.closeToTray = !a.closeToTray;
+        SaveSettings(a);
+    }
+    ImGui::Spacing();
+    ImGui::PushFont(g_fontBold);
+    ImGui::TextUnformatted("Мова");
+    ImGui::PopFont();
+    ImGui::SetNextItemWidth(S(240));
+    if (ImGui::BeginCombo("##lang", "Українська")) {
+        ImGui::Selectable("Українська", true);
+        ImGui::BeginDisabled();
+        ImGui::Selectable("English (скоро)", false);
+        ImGui::Selectable("Deutsch (скоро)", false);
+        ImGui::EndDisabled();
+        ImGui::EndCombo();
+    }
+    EndCard();
+
+    // --- Про програму ---
+    ImGui::Spacing();
+    BeginCard("about", ImVec2(0, 0));
+    SectionTitle("Про програму");
+    ImGui::Text("%s  ·  версія %s", KB_ED("KairoBoost", "KairoBoost Pro"), KB_VERSION);
+    HelpText(KB_ED("Оптимізатор Windows для Fortnite.", "Оптимізатор Windows для ігор."));
+    HelpText("Інтерфейс: Dear ImGui (ліцензія MIT).");
+#if KB_IS_SALE
+    HelpText("Не пов'язано з Epic Games, Valve, Riot Games, Activision, Blizzard, Ubisoft та іншими видавцями ігор. "
+             "Назви ігор належать їхнім власникам.");
+#endif
+    if (ImGui::Button("Відкрити папку налаштувань", ImVec2(S(260), S(34)))) {
+        std::string dir = lb::GetEnv("APPDATA") + "\\KairoBoost";
+        ShellExecuteA(nullptr, "open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    }
+    EndCard();
+
+    if (changed) {
+        ApplyLook(a);
+        SaveSettings(a);
+    }
+}
+
+// Шестерня — кнопка «Налаштування» у правому верхньому куті
+static void DrawGear(ImDrawList* dl, ImVec2 c, float R, ImU32 col, ImU32 hole) {
+    const int teeth = 8;
+    const float pi = 3.14159265f;
+    float Rb = R * 0.74f;
+    std::vector<ImVec2> pts;
+    for (int i = 0; i < teeth; ++i) {
+        float a0 = i * 2 * pi / teeth;
+        float w2 = pi / teeth * 0.62f, w1 = pi / teeth * 0.36f;
+        auto P = [&](float ang, float r) { return ImVec2(c.x + cosf(ang) * r, c.y + sinf(ang) * r); };
+        pts.push_back(P(a0 - w2, Rb));
+        pts.push_back(P(a0 - w1, R));
+        pts.push_back(P(a0 + w1, R));
+        pts.push_back(P(a0 + w2, Rb));
+    }
+    dl->AddConcavePolyFilled(pts.data(), (int)pts.size(), col);
+    dl->AddCircleFilled(c, R * 0.34f, hole, 24);
+}
+
+static void GearButton(App& a) {
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    float size = S(40);
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - size - S(26), vp->WorkPos.y + S(12)));
+    ImGui::SetNextWindowSize(ImVec2(size, size));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::Begin("##gear", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings |
+                     ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove);
+    ImGui::PopStyleVar();
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    bool clicked = ImGui::InvisibleButton("##gearbtn", ImVec2(size, size));
+    bool hovered = ImGui::IsItemHovered();
+    bool active = a.page == PageSettings;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 c(p.x + size / 2, p.y + size / 2);
+    if (hovered || active) dl->AddCircleFilled(c, size / 2, ImGui::GetColorU32(Fade(kAccent, active ? 0.20f : 0.12f)));
+    ImU32 col = ImGui::GetColorU32(active || hovered ? kAccent : kMuted);
+    ImU32 hole = ImGui::GetColorU32(hovered || active ? ImVec4(0, 0, 0, 0) : kBg);
+    DrawGear(dl, c, size * 0.32f, col, hole);
+    if (hovered || active) dl->AddCircleFilled(c, size * 0.32f * 0.34f, ImGui::GetColorU32(kBg), 24);
+    if (hovered) ImGui::SetTooltip("Налаштування");
+    if (clicked) {
+        if (active) {
+            a.page = a.prevPage;
+        } else {
+            a.prevPage = a.page;
+            a.page = PageSettings;
+        }
+    }
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
 // Головний кадр
 // ---------------------------------------------------------------------------
 
@@ -2191,14 +2564,14 @@ static void DrawUi(App& a) {
 
     const char* names[PageCount] = {"Головна",     "Порадник",    KB_ED("Fortnite", "Гра"),    "Твіки",     "Timer Resolution",
                                     "Очистка ОЗУ", "Тест мережі", "DNS",       "Режим гри",
-                                    "Як це працює"};
-    for (int i = 0; i < PageCount; ++i) {
+                                    "Як це працює", "Налаштування"};
+    for (int i = 0; i < PageSettings; ++i) {  // «Налаштування» — окремо, кнопкою-шестернею
         bool sel = a.page == i;
         ImVec4 acc = i == PageFortnite ? kFortnite : kAccent;
         ImGui::PushStyleColor(ImGuiCol_Button, sel ? Fade(acc, 0.18f) : ImVec4(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Fade(acc, sel ? 0.25f : 0.10f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, Fade(acc, 0.30f));
-        ImGui::PushStyleColor(ImGuiCol_Text, sel ? acc : ImVec4(0.85f, 0.87f, 0.92f, 1));
+        ImGui::PushStyleColor(ImGuiCol_Text, sel ? acc : kText);
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(S(14), S(9)));
         if (ImGui::Button(names[i], ImVec2(-1, 0))) a.page = (Page)i;
@@ -2243,12 +2616,13 @@ static void DrawUi(App& a) {
         case PageNet: PageNetUi(a); break;
         case PageDns: PageDnsUi(a); break;
         case PageGame: PageGameUi(a); break;
+        case PageSettings: PageSettingsUi(a); break;
         default: PageInfoUi(a); break;
     }
     ImGui::EndChild();
 
     // --- Журнал ---
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.040f, 0.045f, 0.062f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, kLogBg);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(S(16), S(10)));
     ImGui::BeginChild("log", ImVec2(0, 0), ImGuiChildFlags_AlwaysUseWindowPadding);
     ImGui::TextColored(kMuted, "ЖУРНАЛ");
@@ -2261,7 +2635,7 @@ static void DrawUi(App& a) {
     {
         std::lock_guard<std::mutex> l(a.logMutex);
         for (auto& line : a.log) {
-            ImVec4 c = ImVec4(0.80f, 0.83f, 0.88f, 1);
+            ImVec4 c = kText;
             if (line.find("[OK]") != std::string::npos) c = kGood;
             else if (line.find("[!]") != std::string::npos || line.find("[ПОМИЛКА]") != std::string::npos) c = kBad;
             ImGui::PushStyleColor(ImGuiCol_Text, c);
@@ -2281,51 +2655,73 @@ static void DrawUi(App& a) {
     ImGui::EndGroup();
 
     ImGui::End();
+    GearButton(a);
 }
 
 static void SetupStyle() {
     ImGuiStyle& st = ImGui::GetStyle();
-    ImGui::StyleColorsDark(&st);
+    st = ImGuiStyle();  // скидання розмірів перед новим масштабом
+    if (g_lightTheme)
+        ImGui::StyleColorsLight(&st);
+    else
+        ImGui::StyleColorsDark(&st);
+    float r = g_round;
     st.WindowRounding = 0;
-    st.ChildRounding = 10;
-    st.FrameRounding = 7;
-    st.GrabRounding = 7;
-    st.PopupRounding = 8;
-    st.ScrollbarRounding = 8;
-    st.TabRounding = 7;
+    st.ChildRounding = r;
+    st.FrameRounding = r * 0.7f;
+    st.GrabRounding = r * 0.7f;
+    st.PopupRounding = r * 0.8f;
+    st.ScrollbarRounding = r * 0.8f;
+    st.TabRounding = r * 0.7f;
     st.FramePadding = ImVec2(10, 7);
     st.ItemSpacing = ImVec2(10, 9);
     st.WindowBorderSize = 0;
     st.ChildBorderSize = 1;
     st.FrameBorderSize = 0;
+    st.PopupBorderSize = 1;
     st.GrabMinSize = 14;
+    auto mix = [](ImVec4 a, ImVec4 b, float t) {
+        return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, 1);
+    };
     ImVec4* c = st.Colors;
+    c[ImGuiCol_Text] = kText;
+    c[ImGuiCol_TextDisabled] = kMuted;
     c[ImGuiCol_WindowBg] = kBg;
     c[ImGuiCol_ChildBg] = kBg;
     c[ImGuiCol_PopupBg] = kPanel;
-    c[ImGuiCol_Border] = ImVec4(1, 1, 1, 0.06f);
+    c[ImGuiCol_Border] = Fade(kText, g_lightTheme ? 0.10f : 0.06f);
     c[ImGuiCol_FrameBg] = kPanel2;
-    c[ImGuiCol_FrameBgHovered] = ImVec4(0.16f, 0.18f, 0.24f, 1);
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.19f, 0.21f, 0.28f, 1);
+    c[ImGuiCol_FrameBgHovered] = mix(kPanel2, kText, 0.06f);
+    c[ImGuiCol_FrameBgActive] = mix(kPanel2, kText, 0.12f);
     c[ImGuiCol_Button] = kPanel2;
-    c[ImGuiCol_ButtonHovered] = ImVec4(0.17f, 0.19f, 0.26f, 1);
-    c[ImGuiCol_ButtonActive] = ImVec4(0.21f, 0.23f, 0.31f, 1);
+    c[ImGuiCol_ButtonHovered] = mix(kPanel2, kText, 0.07f);
+    c[ImGuiCol_ButtonActive] = mix(kPanel2, kText, 0.14f);
     c[ImGuiCol_SliderGrab] = kAccent;
     c[ImGuiCol_SliderGrabActive] = kAccent;
     c[ImGuiCol_CheckMark] = kAccent;
     c[ImGuiCol_Header] = Fade(kAccent, 0.2f);
     c[ImGuiCol_HeaderHovered] = Fade(kAccent, 0.3f);
+    c[ImGuiCol_HeaderActive] = Fade(kAccent, 0.4f);
     c[ImGuiCol_TableHeaderBg] = kPanel2;
     c[ImGuiCol_TableRowBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_TableRowBgAlt] = ImVec4(1, 1, 1, 0.025f);
-    c[ImGuiCol_TableBorderLight] = ImVec4(1, 1, 1, 0.04f);
+    c[ImGuiCol_TableRowBgAlt] = Fade(kText, 0.03f);
+    c[ImGuiCol_TableBorderLight] = Fade(kText, 0.05f);
+    c[ImGuiCol_TableBorderStrong] = Fade(kText, 0.08f);
+    c[ImGuiCol_Separator] = Fade(kText, 0.08f);
     c[ImGuiCol_TextSelectedBg] = Fade(kAccent, 0.35f);
-    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.6f);
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.5f);
     c[ImGuiCol_PlotLines] = kAccent2;
+    c[ImGuiCol_PlotLinesHovered] = kAccent;
+    c[ImGuiCol_PlotHistogram] = kAccent;
     c[ImGuiCol_TitleBg] = kPanel2;
     c[ImGuiCol_TitleBgActive] = kPanel2;
-    c[ImGuiCol_PlotLinesHovered] = kAccent;
-    st.ScaleAllSizes(g_dpi);
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_ScrollbarGrab] = Fade(kText, 0.18f);
+    c[ImGuiCol_ScrollbarGrabHovered] = Fade(kText, 0.28f);
+    c[ImGuiCol_ScrollbarGrabActive] = Fade(kText, 0.38f);
+    st.ScaleAllSizes(g_dpi * g_ui);
+    ImGui::GetIO().FontGlobalScale = g_ui;
+    g_styleDirty = false;
 }
 
 static void LoadFonts() {
@@ -2485,7 +2881,8 @@ static void HideWindow(HWND hwnd, bool toTray) {
         ShowWindow(hwnd, SW_MINIMIZE);
 }
 
-int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
+int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR cmdLine, int) {
+    bool startInTray = cmdLine && strstr(cmdLine, "--tray");  // автозапуск з Windows
     // Лише одна копія: повторний запуск показує вже відкрите вікно (зокрема з трею)
     HANDLE single = CreateMutexW(nullptr, TRUE, L"KairoBoost_SingleInstance");
     if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -2513,6 +2910,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     app.elevated = lb::IsElevated();
     app.build = lb::WindowsBuild();
     LoadSettings(app);
+    ApplyLook(app);
 #if KB_IS_SALE
     ApplyGame(app, app.gameId, false);
 #endif
@@ -2554,7 +2952,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     }
     g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     TrayAdd(hwnd);
-    ShowWindow(hwnd, SW_SHOWDEFAULT);
+    ShowWindow(hwnd, startInTray ? SW_HIDE : SW_SHOWDEFAULT);
     UpdateWindow(hwnd);
 
     IMGUI_CHECKVERSION();
@@ -2566,6 +2964,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
     LoadFonts();
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init(g_device, g_context);
+    if (app.autoBoost) StartGameMode(app);  // налаштування «Вмикати БУСТ при запуску програми»
 
     // Цикл малювання економний: кадр малюється лише коли є ввід або раз на певний час.
     //  - вікно активне:          до 60 к/с під час взаємодії, ~15 к/с у спокої
@@ -2624,6 +3023,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int) {
             CreateRenderTarget();
         }
 
+        if (g_styleDirty) SetupStyle();  // зміна теми/масштабу — між кадрами
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();

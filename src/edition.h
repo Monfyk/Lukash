@@ -10,3 +10,5 @@
 #define KB_ED(personal, sale) personal
 #define KB_IS_SALE 0
 #endif
+
+#define KB_VERSION "1.0.0"
