@@ -30,6 +30,17 @@
       <label class="sm">до<input type="number" id="nmax" min="1" max="30" value="7"></label>
       <label class="sm">Людей<input type="number" id="adults" min="1" max="9" value="1"></label>
     </div>
+    <div class="row">
+      <label class="md">Рейтинг житла від
+        <select id="rating">
+          <option value="7">★ 7+ (нормально)</option>
+          <option value="8" selected>★ 8+ (дуже добре)</option>
+          <option value="8.5">★ 8.5+ (чудово)</option>
+          <option value="9">★ 9+ (супер)</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="nohostel" checked> Без хостелів — лише окремі апартаменти чи номер у готелі</label>
+    </div>
     <div class="row actions">
       <button type="submit" class="primary">🔎 Знайти найвигідніше</button>
       <button type="button" id="anywhere">🌍 Куди завгодно, аби дешево</button>

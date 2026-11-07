@@ -21,7 +21,7 @@ footer{max-width:1150px;margin:0 auto;padding:0 16px 30px;color:var(--muted);fon
 .row:last-child{margin-bottom:0}
 label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);flex:1 1 180px}
 label.sm{flex:0 1 90px}
-input{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px;min-width:0}
+input,select{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 10px;min-width:0}
 button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:9px;padding:9px 14px}
 button:hover{border-color:var(--accent)}
 button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
@@ -65,3 +65,7 @@ svg text{fill:var(--muted);font-size:11px}
 .nm{font-weight:600}
 .muted{color:var(--muted);font-size:13px}
 @media (max-width:600px){ .deals{grid-template-columns:1fr} h1{font-size:23px} }
+label.md{flex:0 1 220px}
+label.check{flex-direction:row;align-items:center;gap:8px;font-size:14px;color:var(--text);flex:1 1 300px;padding-bottom:9px}
+label.check input{width:18px;height:18px}
+.stars{display:inline-block;font-size:12px;font-weight:700;padding:1px 6px;border-radius:6px;background:var(--good);color:#fff;margin-left:4px}

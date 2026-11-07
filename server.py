@@ -89,23 +89,43 @@ def est_ground_oneway(o, d, day: date):
     return {"type": "train", "price": max(round(train), 9), "hours": round(hours_train, 1)}
 
 
-def est_stay(d, checkin: date, nights: int, adults: int):
+def quality_factor(rating: float) -> float:
+    """Чим вищий рейтинг гостей, тим дорожче: 6.5 → ×0.6, 8.0 → ×1.0, 9.5 → ×1.65."""
+    return 0.6 + 0.27 * max(0.0, rating - 6.5) + 0.25 * max(0.0, rating - 8.5) ** 2
+
+
+def est_stay(d, checkin: date, nights: int, adults: int, min_rating: float = 8.0, no_hostels: bool = True):
+    """Найдешевший варіант кожного типу житла з рейтингом не нижче min_rating."""
     total = 0.0
     for i in range(nights):
         day = checkin + timedelta(days=i)
-        n = 0.7 + 0.6 * rnd("h", d["code"], day)
+        n = 0.75 + 0.5 * rnd("h", d["code"], day)
         total += d["hotel"] * WEEKDAY_HOTEL[day.weekday()] * season(day) * n
     rooms = max(1, math.ceil(adults / 2))
-    hostel = total * 0.45 * adults
-    apart = total * 0.9 * rooms * (1 if adults <= 2 else 0.85)
-    hotel = total * 1.15 * rooms
-    if rnd("hdeal", d["code"], checkin, nights) < 0.06:
-        apart *= 0.45
-    opts = [
-        {"type": "hostel", "price": round(hostel)},
-        {"type": "apartment", "price": round(apart)},
-        {"type": "hotel", "price": round(hotel)},
-    ]
+    base = {
+        "hostel": total * 0.45 * adults,
+        "apartment": total * 0.9 * rooms * (1 if adults <= 2 else 0.85),
+        "hotel": total * 1.15 * rooms,
+    }
+    opts = []
+    for typ, b in base.items():
+        if no_hostels and typ == "hostel":
+            continue
+        best = None
+        # кілька «пропозицій» з різним рейтингом гостей, як у пошуку на Booking
+        for k in range(10):
+            r = round(6.0 + 3.7 * rnd("r", d["code"], typ, k), 1)
+            if r < min_rating:
+                continue
+            p = b * quality_factor(r) * (0.8 + 0.4 * rnd("p", d["code"], typ, k, checkin))
+            if rnd("hdeal", d["code"], typ, k, checkin, nights) < 0.03:
+                p *= 0.5  # рідкісна знижка в хорошому місці
+            if best is None or p < best["price"]:
+                best = {"type": typ, "price": round(p), "rating": r}
+        if best is None:  # навіть найсуворіший фільтр: беремо топове місце
+            r = max(min_rating, 9.5)
+            best = {"type": typ, "price": round(b * quality_factor(r)), "rating": round(r, 1)}
+        opts.append(best)
     return sorted(opts, key=lambda x: x["price"])
 
 
@@ -180,21 +200,27 @@ def links_ground(o, d, dep: date, adults: int):
     ]
 
 
-def links_stay(d, cin: date, cout: date, adults: int):
+def links_stay(d, cin: date, cout: date, adults: int, min_rating: float = 8.0, no_hostels: bool = True):
     c = urllib.parse.quote(d["en"])
     n = (cout - cin).days
-    return [
-        {"site": "Booking.com", "url": f"https://www.booking.com/searchresults.html?ss={c}&checkin={cin}&checkout={cout}&group_adults={adults}&no_rooms=1&order=price"},
-        {"site": "Airbnb", "url": f"https://www.airbnb.com/s/{c}/homes?checkin={cin}&checkout={cout}&adults={adults}"},
-        {"site": "Hostelworld", "url": f"https://www.hostelworld.com/st/hostels/search/?search_keywords={c}&from={cin}&to={cout}&guests={adults}"},
+    # Booking: фільтр «оцінка гостей» (60/70/80/90 = 6+/7+/8+/9+) — вже вбудований у посилання
+    score = int(min_rating) * 10
+    nflt = f"review_score%3D{score}" if score >= 60 else ""
+    links = [
+        {"site": f"Booking.com ★{min_rating:g}+", "url": f"https://www.booking.com/searchresults.html?ss={c}&checkin={cin}&checkout={cout}&group_adults={adults}&no_rooms=1&order=price" + (f"&nflt={nflt}" if nflt else "")},
+        {"site": "Airbnb" + (" (Guest favourite)" if min_rating >= 8.5 else ""), "url": f"https://www.airbnb.com/s/{c}/homes?checkin={cin}&checkout={cout}&adults={adults}" + ("&guest_favorite=true" if min_rating >= 8.5 else "") + ("&room_types%5B%5D=Entire%20home%2Fapt" if no_hostels else "")},
         {"site": "Agoda", "url": f"https://www.agoda.com/search?textToSearch={c}&checkIn={cin}&los={n}&adults={adults}&rooms=1&sort=priceLowToHigh"},
         {"site": "Hotels.com", "url": f"https://www.hotels.com/Hotel-Search?destination={c}&startDate={cin}&endDate={cout}&adults={adults}&sort=PRICE_LOW_TO_HIGH"},
         {"site": "Trivago", "url": f"https://www.trivago.com/en-US/srl?search={c}"},
     ]
+    if not no_hostels:
+        links.insert(2, {"site": "Hostelworld", "url": f"https://www.hostelworld.com/st/hostels/search/?search_keywords={c}&from={cin}&to={cout}&guests={adults}"})
+    return links
 
 
 # ───────────────────────── пошук ─────────────────────────
-def search(o, d, start: date, end: date, nmin: int, nmax: int, adults: int, with_links=True):
+def search(o, d, start: date, end: date, nmin: int, nmax: int, adults: int, with_links=True,
+           min_rating: float = 8.0, no_hostels: bool = True):
     live, live_err = live_flights(o, d, start, end)
     cells = []
     day = start
@@ -217,7 +243,7 @@ def search(o, d, start: date, end: date, nmin: int, nmax: int, adults: int, with
             transport = {"mode": "flight", **fl}
             if ground and (ground["price"] < fl["price"] * 0.85 or km(o, d) < 350):
                 transport = {"mode": ground["type"], **ground}
-            stays = est_stay(d, day, n, adults)
+            stays = est_stay(d, day, n, adults, min_rating, no_hostels)
             total = transport["price"] + stays[0]["price"]
             cells.append({
                 "dep": day.isoformat(), "ret": ret.isoformat(), "nights": n,
@@ -242,13 +268,13 @@ def search(o, d, start: date, end: date, nmin: int, nmax: int, adults: int, with
                 "flight": links_flight(o, d, dep, ret, adults),
                 "ground": links_ground(o, d, dep, adults) if c["ground"] else [],
                 "ground_back": links_ground(d, o, ret, adults) if c["ground"] else [],
-                "stay": links_stay(d, dep, ret, adults),
+                "stay": links_stay(d, dep, ret, adults, min_rating, no_hostels),
             }
             if c["flight"].get("link"):
                 c["links"]["flight"].insert(0, {"site": "Aviasales (ця ціна)", "url": c["flight"]["link"]})
     return {
         "origin": o, "destination": d, "distance_km": round(km(o, d)),
-        "adults": adults, "nights": [nmin, nmax], "range": [start.isoformat(), end.isoformat()],
+        "adults": adults, "nights": [nmin, nmax], "min_rating": min_rating, "no_hostels": no_hostels, "range": [start.isoformat(), end.isoformat()],
         "median": round(med), "min": min(totals), "max": max(totals),
         "cells": [{k: c[k] for k in ("dep", "ret", "nights", "total", "deal", "ratio")} for c in cells],
         "best": best,
@@ -258,19 +284,19 @@ def search(o, d, start: date, end: date, nmin: int, nmax: int, adults: int, with
     }
 
 
-def search_anywhere(o, start, end, nmin, nmax, adults):
+def search_anywhere(o, start, end, nmin, nmax, adults, min_rating=8.0, no_hostels=True):
     out = []
     for d in BY_CODE.values():
         if d["code"] == o["code"]:
             continue
-        r = search(o, d, start, end, nmin, nmax, adults, with_links=False)
+        r = search(o, d, start, end, nmin, nmax, adults, False, min_rating, no_hostels)
         if "best" not in r:
             continue
         b = r["best"][0]
         out.append({"destination": d, "best": b, "median": r["median"], "mode": r["mode"],
                     "distance_km": r["distance_km"]})
     out.sort(key=lambda x: x["best"]["total"])
-    return {"origin": o, "results": out[:30], "adults": adults}
+    return {"origin": o, "results": out[:30], "adults": adults, "min_rating": min_rating}
 
 
 # ───────────────────────── HTTP ─────────────────────────
@@ -309,15 +335,18 @@ class Handler(SimpleHTTPRequestHandler):
                 nmin = max(1, min(int(q.get("nmin", 3)), 30))
                 nmax = max(nmin, min(int(q.get("nmax", 7)), 30))
                 adults = max(1, min(int(q.get("adults", 1)), 9))
+                min_rating = max(0.0, min(float(q.get("rating", 8)), 9.5))
+                no_hostels = q.get("nohostel", "1") != "0"
+                extra = (min_rating, no_hostels)
                 to = q.get("to", "").strip()
                 if not to or to.lower() in ("any", "куди завгодно", "*"):
-                    return self.send_json(search_anywhere(o, start, end, nmin, nmax, adults))
+                    return self.send_json(search_anywhere(o, start, end, nmin, nmax, adults, *extra))
                 d = find_city(to)
                 if not d:
                     return self.send_json({"error": f"Не знаю місто «{to}». Вибери зі списку."}, 400)
                 if d["code"] == o["code"]:
                     return self.send_json({"error": "Звідки і куди — одне й те саме місто 🙂"}, 400)
-                return self.send_json(search(o, d, start, end, nmin, nmax, adults))
+                return self.send_json(search(o, d, start, end, nmin, nmax, adults, True, *extra))
             except Exception as e:  # noqa
                 return self.send_json({"error": f"Помилка: {e}"}, 500)
         return super().do_GET()
