@@ -5,6 +5,7 @@
 #include "dns.h"
 #include "edition.h"
 #include "games.h"
+#include "license.h"
 
 #include <commdlg.h>
 #include "advisor.h"
@@ -235,6 +236,10 @@ struct DnsRow {
     bool done = false;
 };
 
+// Функції, що входять лише в Pro (у редакції для продажу)
+static bool IsProPage(int p) { return p == PageAdvisor || p == PageRam || p == PageNet || p == PageDns; }
+static bool ProLocked() { return KB_IS_SALE && !lic::IsPro(); }
+
 struct TweakState {
     bool on = false;
     std::string unavailable;
@@ -331,6 +336,8 @@ struct App {
     bool autoBoost = false;
     int autostart = -1;  // -1 — ще не перевіряли
     Page prevPage = PageHome;
+    char licKey[256] = "";
+    std::string licMsg;
     bool closeToTray = true;     // хрестик ховає програму в трей
     bool trayHintShown = false;
 
@@ -348,6 +355,7 @@ struct App {
 };
 
 static App* g_app = nullptr;
+static void UpsellCard(App& a, const char* title, const char* text);  // нижче, розділ «Ліцензія»
 static const int kFpsOptions[] = {0, 60, 120, 144, 165, 240, 360};
 static const char* kFpsNames[] = {"Без обмеження", "60", "120", "144", "165", "240", "360"};
 static const int kHours[] = {1, 2, 4, 6, 12};
@@ -623,6 +631,10 @@ static void StartRamClean(App& a, bool purgeStandby = true) {
 
 // Автоматична очистка ОЗУ за умовами (викликається щокадру, навіть коли вікно згорнуте)
 static void RamScheduler(App& a) {
+    if (ProLocked()) {  // очистка ОЗУ — функція Pro
+        a.ramRequest = false;
+        return;
+    }
     if (a.ramRequest && !a.ramTask.running) {
         a.ramRequest = false;
         lb::Log("Гру запущено — звільняю пам'ять фонових програм");
@@ -936,6 +948,18 @@ static std::string BestPingText(App& a) {
 static void PageHomeUi(App& a) {
     Title("Головна", KB_ED("Timer Resolution, оптимізація Windows і мережі для Fortnite — в одній програмі.",
                            "Timer Resolution, оптимізація Windows і мережі для ігор — в одній програмі."));
+#if KB_IS_SALE
+    {
+        lic::Status ls = lic::Get();
+        if (ls.trial && ls.keyTier != lic::Pro) {
+            char b[512];
+            snprintf(b, sizeof(b), "Пробний період Pro: залишилось днів — %d. Потім відкритими лишаться функції %s.",
+                     ls.trialDaysLeft, ls.keyTier == lic::Standard ? "Standard" : "твоєї ліцензії");
+            InfoBox(b, kFortnite);
+            ImGui::Spacing();
+        }
+    }
+#endif
 
     ULONG coarsest = 0, finest = 0, current = 0;
     lb::TimerQuery(coarsest, finest, current);
@@ -1417,6 +1441,14 @@ static void PageFortniteUi(App& a) {
         HelpText("Кабель замість Wi-Fi, частота опитування миші 1000 Гц+, свіжий драйвер відеокарти — "
                  "дають ефект у будь-якій грі.");
         EndCard();
+        return;
+    }
+
+    if (ProLocked()) {
+        ImGui::Spacing();
+        UpsellCard(a, "Налаштування Fortnite і сервери — у KairoBoost Pro",
+                   "FPS, VSync, режим продуктивності, повноекранний режим, мінімальна графіка одним кліком і пінг до "
+                   "регіонів Epic з підказкою, який вибрати.");
         return;
     }
 
@@ -2232,6 +2264,120 @@ static void PageInfoUi(App&) {
 }
 
 // ---------------------------------------------------------------------------
+// Ліцензія: Pro-функції, активація
+// ---------------------------------------------------------------------------
+
+static void OpenShop() {
+    if (KB_SHOP_URL[0]) ShellExecuteA(nullptr, "open", KB_SHOP_URL, nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+static void ProFeatureList() {
+    const char* items[] = {"Порадник — аналіз твого ПК і поради, що вмикати",
+                           "Очистка ОЗУ — вручну, при старті гри, за нестачі пам'яті або за розкладом",
+                           "DNS — тест і вибір найшвидшого сервера, захист від перехоплення",
+                           "Тест мережі — пінг, джитер і втрати до будь-яких серверів",
+                           "Fortnite — налаштування FPS і графіки та пінг до регіонів"};
+    for (auto* it : items) {
+        Dot(kFortnite);
+        ImGui::TextWrapped("%s", it);
+    }
+}
+
+static void UpsellCard(App& a, const char* title, const char* text) {
+    BeginCard("upsell", ImVec2(0, 0));
+    ImGui::PushFont(g_fontTitle);
+    ImGui::TextColored(kFortnite, "%s", title);
+    ImGui::PopFont();
+    HelpText(text);
+    ImGui::Spacing();
+    if (AccentButton("Ввести ключ", ImVec2(S(200), S(38)), kFortnite)) {
+        a.prevPage = a.page;
+        a.page = PageSettings;
+    }
+    if (KB_SHOP_URL[0]) {
+        ImGui::SameLine();
+        if (ImGui::Button("Купити Pro", ImVec2(S(200), S(38)))) OpenShop();
+    }
+    EndCard();
+}
+
+static void UpsellUi(App& a, int page) {
+    const char* names[] = {"", "Порадник", "", "", "", "Очистка ОЗУ", "Тест мережі", "DNS"};
+    const char* descs[] = {"",
+                           "Аналізує саме твій ПК — процесор, відеокарту, пам'ять, монітор, мережу — і пояснює, що "
+                           "ввімкнути, а що для тебе не варто.",
+                           "", "", "",
+                           "Звільняє оперативну пам'ять і кеш, який не віддається грі: вручну, при старті гри, за нестачі "
+                           "пам'яті або за розкладом.",
+                           "Пінг, джитер і втрати до кількох серверів одночасно, з графіками і вибором найкращого.",
+                           "Справжній тест швидкості DNS-серверів, вибір найшвидшого в один клік і перевірка, чи мережа "
+                           "не перехоплює DNS."};
+    Title(names[page], descs[page]);
+    UpsellCard(a, "Це функція KairoBoost Pro", "Онови ліцензію до Pro, щоб відкрити її разом з іншими функціями:");
+    ImGui::Spacing();
+    BeginCard("prolist", ImVec2(0, 0));
+    SectionTitle("Що входить у Pro");
+    ProFeatureList();
+    EndCard();
+}
+
+static void ActivationRequiredUi(App& a) {
+    Title("Активуй KairoBoost", "Пробний період закінчився. Введи ключ ліцензії, щоб продовжити.");
+    UpsellCard(a, "Потрібен ключ ліцензії",
+               "Ключ надходить на пошту після покупки. Standard — усі твіки, вибір гри, БУСТ і Timer Resolution; "
+               "Pro — ще й порадник, очистка ОЗУ, DNS, тест мережі й налаштування Fortnite.");
+}
+
+// Розділ «Ліцензія» на сторінці налаштувань
+static void LicenseSection(App& a) {
+    lic::Status ls = lic::Get();
+    BeginCard("license", ImVec2(0, 0));
+    SectionTitle("Ліцензія");
+    if (ls.keyTier != lic::None) {
+        Dot(ls.keyTier == lic::Pro ? kFortnite : kGood);
+        ImGui::Text("KairoBoost %s  ·  ключ #%u", lic::TierName(ls.keyTier), ls.serial);
+    } else if (ls.trial) {
+        Dot(kWarn);
+        ImGui::TextColored(kWarn, "Пробний Pro: залишилось днів — %d", ls.trialDaysLeft);
+    } else {
+        Dot(kBad);
+        ImGui::TextColored(kBad, "Не активовано");
+    }
+    if (ls.keyTier == lic::Standard && ls.trial)
+        HelpText("Поки діє пробний період, функції Pro теж відкриті.");
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(-S(170));
+    bool enter = ImGui::InputTextWithHint("##key", "Встав ключ ліцензії (XXXXXXXX-XXXXXXXX-…)", a.licKey, sizeof(a.licKey),
+                                          ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    if (AccentButton("Активувати", ImVec2(-1, 0), kFortnite) || enter) {
+        std::string err;
+        if (lic::Activate(a.licKey, err)) {
+            lic::Status ns = lic::Get();
+            lb::Log("[OK] Ліцензію активовано: KairoBoost %s", lic::TierName(ns.keyTier));
+            a.licMsg = std::string("Активовано: KairoBoost ") + lic::TierName(ns.keyTier);
+            a.licKey[0] = 0;
+            a.tweakStateTime = -1e9;
+        } else {
+            a.licMsg = err;
+        }
+    }
+    if (!a.licMsg.empty()) ImGui::TextColored(a.licMsg.rfind("Активовано", 0) == 0 ? kGood : kBad, "%s", a.licMsg.c_str());
+    if (ls.keyTier != lic::None) {
+        if (ImGui::SmallButton("Деактивувати на цьому ПК")) {
+            lic::Deactivate();
+            a.licMsg = "Ключ видалено з цього ПК";
+        }
+    }
+    if (KB_SHOP_URL[0]) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton(ls.keyTier == lic::Pro ? "Магазин" : "Купити / оновити до Pro")) OpenShop();
+    }
+    EndCard();
+    ImGui::Spacing();
+}
+
+// ---------------------------------------------------------------------------
 // Налаштування
 // ---------------------------------------------------------------------------
 
@@ -2344,6 +2490,9 @@ static bool Choice(const char* label, bool selected, ImVec2 size = ImVec2(0, 0))
 
 static void PageSettingsUi(App& a) {
     Title("Налаштування", "Вигляд програми, автозапуск і поведінка.");
+#if KB_IS_SALE
+    LicenseSection(a);
+#endif
     if (a.autostart < 0) a.autostart = AutostartEnabled() ? 1 : 0;
     bool changed = false;
 
@@ -2555,8 +2704,16 @@ static void DrawUi(App& a) {
     ImGui::SameLine(0, S(6));
     ImGui::TextUnformatted("BOOST");
 #if KB_IS_SALE
-    ImGui::SameLine(0, S(6));
-    ImGui::TextColored(kFortnite, "PRO");
+    {
+        lic::Status ls = lic::Get();
+        if (ls.tier != lic::None) {
+            ImGui::SameLine(0, S(6));
+            if (ls.tier == lic::Pro)
+                ImGui::TextColored(kFortnite, "PRO");
+            else
+                ImGui::TextColored(kMuted, "STD");
+        }
+    }
 #endif
     ImGui::PopFont();
     ImGui::TextColored(kMuted, KB_ED("оптимізатор для Fortnite", "оптимізатор для ігор"));
@@ -2575,6 +2732,15 @@ static void DrawUi(App& a) {
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.0f, 0.5f));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(S(14), S(9)));
         if (ImGui::Button(names[i], ImVec2(-1, 0))) a.page = (Page)i;
+        if (IsProPage(i) && ProLocked()) {  // позначка «PRO» на закритих функціях
+            ImVec2 mx = ImGui::GetItemRectMax(), mn = ImGui::GetItemRectMin();
+            const char* tag = "PRO";
+            ImVec2 ts = ImGui::CalcTextSize(tag);
+            ImVec2 tp(mx.x - ts.x - S(14), mn.y + (mx.y - mn.y - ts.y) * 0.5f);
+            ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(tp.x - S(6), tp.y - S(1)), ImVec2(tp.x + ts.x + S(6), tp.y + ts.y + S(1)),
+                                                      ImGui::GetColorU32(Fade(kFortnite, 0.18f)), S(5));
+            ImGui::GetWindowDrawList()->AddText(tp, ImGui::GetColorU32(kFortnite), tag);
+        }
         ImGui::PopStyleVar(2);
         ImGui::PopStyleColor(4);
     }
@@ -2606,6 +2772,13 @@ static void DrawUi(App& a) {
         InfoBox("Програма запущена без прав адміністратора — твіки, QoS і очистка ОЗУ не спрацюють.", kBad);
         ImGui::Spacing();
     }
+#if KB_IS_SALE
+    if (!lic::HasAccess() && a.page != PageSettings && a.page != PageInfo) {
+        ActivationRequiredUi(a);
+    } else if (IsProPage(a.page) && ProLocked()) {
+        UpsellUi(a, a.page);
+    } else
+#endif
     switch (a.page) {
         case PageHome: PageHomeUi(a); break;
         case PageAdvisor: PageAdvisorUi(a); break;

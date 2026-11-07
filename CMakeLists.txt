@@ -7,8 +7,8 @@ if(MSVC)
 endif()
 
 set(IMGUI ${CMAKE_SOURCE_DIR}/third_party/imgui)
-set(CORE src/core.cpp src/tweaks.cpp src/fortnite.cpp src/dns.cpp src/advisor.cpp src/games.cpp)
-set(CORE_LIBS ws2_32 iphlpapi advapi32 powrprof psapi)
+set(CORE src/core.cpp src/tweaks.cpp src/fortnite.cpp src/dns.cpp src/advisor.cpp src/games.cpp src/license.cpp)
+set(CORE_LIBS ws2_32 iphlpapi advapi32 powrprof psapi bcrypt)
 
 set(GUI_SRC src/gui.cpp ${CORE} src/app.rc
   ${IMGUI}/imgui.cpp ${IMGUI}/imgui_draw.cpp ${IMGUI}/imgui_tables.cpp ${IMGUI}/imgui_widgets.cpp

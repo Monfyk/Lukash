@@ -3,3 +3,4 @@
 *.res
 build/
 *.zip
+keys-private/
