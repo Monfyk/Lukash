@@ -391,7 +391,7 @@ input[type="text"]{font:14px var(--f-mono);color:var(--ink);background:var(--sur
     <div class="notes" id="dNotes"></div>
     <div class="eyebrow viz-label">Клавіші піаніно (натисни клавішу, щоб почути)</div>
     <div class="scroll" id="dPiano"></div>
-    <div id="dNeckWrap"><div class="eyebrow viz-label">Гриф гітари</div>
+    <div id="dNeckWrap"><div class="eyebrow viz-label">Гриф гітари (натисни на лад, щоб змінити акорд)</div>
     <div class="scroll" id="dNeck"></div></div>
   </section>
 
@@ -849,10 +849,10 @@ function pianoSVG(midis,lo=36,hi=88,small=false){
   return s+'</svg>';
 }
 function neckSVG(c){
-  const F=15,L=46,top=18,G=17,FW=50; const w=L+F*FW+14,h=top+5*G+30;
+  const F=15,L=46,top=18,G=22,FW=50; const w=L+F*FW+14,h=top+5*G+30;
   const t=tun(); const base=TUNINGS[S.tuning].m;
   const fx=f=>L+f*FW; const sy=s=>top+(5-s)*G;
-  let s=`<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Гриф гітари">`;
+  let s=`<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Гриф гітари — натисни на лад, щоб змінити акорд">`;
   s+=`<rect class="neck-bg" x="${L}" y="${top-8}" width="${F*FW}" height="${5*G+16}" rx="3"/>`;
   [3,5,7,9,15].forEach(f=>s+=`<circle class="inlay" cx="${fx(f-.5)}" cy="${top+2.5*G}" r="5"/>`);
   s+=`<circle class="inlay" cx="${fx(11.5)}" cy="${top+1.5*G}" r="5"/><circle class="inlay" cx="${fx(11.5)}" cy="${top+3.5*G}" r="5"/>`;
@@ -868,8 +868,11 @@ function neckSVG(c){
     for(const p of ps){
       const m=t[i]+p.f; const isB=m===bm;
       if(p.f===0){ s+=`<circle class="dot-open" cx="${L-13}" cy="${sy(i)}" r="7"/><text class="dlab-open" x="${L-13}" y="${sy(i)+3}" text-anchor="middle">${esc(nn(m))}</text>`; }
-      else if(p.f<=F){ s+=`<circle class="dot${isB?' bass':''}" cx="${fx(p.f-.5)}" cy="${sy(i)}" r="8"/><text class="dlab" x="${fx(p.f-.5)}" y="${sy(i)+3}" text-anchor="middle">${esc(nn(m))}</text>`; }
+      else if(p.f<=F){ s+=`<circle class="dot${isB?' bass':''}" cx="${fx(p.f-.5)}" cy="${sy(i)}" r="9"/><text class="dlab" x="${fx(p.f-.5)}" y="${sy(i)+3}" text-anchor="middle">${esc(nn(m))}</text>`; }
     }
+    // клікабельні зони: натискання відкриває акорд у редакторі «Гриф»
+    s+=`<rect class="cell" data-s="${i}" data-f="0" x="${L-28}" y="${sy(i)-G/2}" width="28" height="${G}"/>`;
+    for(let ff=1;ff<=F;ff++) s+=`<rect class="cell" data-s="${i}" data-f="${ff}" x="${fx(ff-1)}" y="${sy(i)-G/2}" width="${FW}" height="${G}"/>`;
   }
   return s+'</svg>';
 }
@@ -1302,6 +1305,14 @@ function init(){
     S.fb[s] = S.fb[s]===f ? -1 : f;
     fbUpdate(); renderDetail(); renderStrip();
     if(S.fb[s]>=0) play([tun()[s]+S.fb[s]]);
+  });
+  $('#dNeck').addEventListener('click',e=>{
+    const r=e.target.closest('[data-s]'); if(!r) return; const s=+r.dataset.s, f=+r.dataset.f;
+    const c=current(); const base=(c&&fretsOf(c))||[-1,-1,-1,-1,-1,-1];
+    S.fb=base.slice(); S.fb[s]=S.fb[s]===f?-1:f;
+    setTab('fretboard'); fbUpdate(); renderDetail(); renderStrip();
+    if(S.fb[s]>=0) play([tun()[s]+S.fb[s]]);
+    $('#tab-fretboard').scrollIntoView({behavior:'smooth',block:'start'});
   });
   $('#fbGhost').addEventListener('change',renderFb);
   $('#fbPlay').addEventListener('click',()=>{const c=fbChord(); if(c) play(c.midis);});
