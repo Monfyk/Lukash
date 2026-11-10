@@ -313,23 +313,56 @@ static bool PowerPlanRevert() {
     return ok;
 }
 
-static bool CoresOn() {
+// «Мінімум активних ядер» (CPMINCORES) поточної схеми живлення
+static bool CoresRead(DWORD& ac, DWORD& dc) {
     GUID a;
-    DWORD ac = 0;
-    return ActiveScheme(a) && PowerReadACValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, &ac) == 0 && ac == 100;
+    if (!ActiveScheme(a)) return false;
+    DWORD r = PowerReadACValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, &ac);
+    PowerReadDCValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, &dc);
+    return r == ERROR_SUCCESS;
+}
+
+static bool CoresOn() {
+    DWORD ac = 0, dc = 0;
+    return CoresRead(ac, dc) && ac == 100;
+}
+
+static std::string CoresUnavailable() {
+    DWORD ac, dc;
+    return CoresRead(ac, dc) ? "" : "Windows не дає керувати паркуванням ядер на цьому ПК";
+}
+
+// Запис значень: спершу через API, якщо Windows відмовила — через powercfg; успіх перевіряємо читанням
+static bool CoresWrite(DWORD ac, DWORD dc) {
+    GUID a;
+    if (!ActiveScheme(a)) {
+        lb::Log("[!] Не вдалося визначити активну схему живлення");
+        return false;
+    }
+    DWORD ra = PowerWriteACValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, ac);
+    DWORD rd = PowerWriteDCValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, dc);
+    PowerSetActiveScheme(nullptr, &a);  // застосувати зміни
+    DWORD nac = 0, ndc = 0;
+    if (CoresRead(nac, ndc) && nac == ac) return true;
+    lb::Log("Запис через API не вдався (код %lu / %lu), пробую powercfg...", ra, rd);
+    std::string out = lb::RunCapture(("powercfg.exe /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR CPMINCORES " +
+                                      std::to_string(ac)).c_str());
+    lb::RunCapture(("powercfg.exe /setdcvalueindex SCHEME_CURRENT SUB_PROCESSOR CPMINCORES " + std::to_string(dc)).c_str());
+    lb::RunHidden("powercfg.exe /setactive SCHEME_CURRENT");
+    if (CoresRead(nac, ndc) && nac == ac) return true;
+    // Прибираємо переноси рядків, щоб повідомлення powercfg вмістилося в журнал
+    for (auto& c : out)
+        if (c == '\r' || c == '\n') c = ' ';
+    lb::Log("[!] Windows не дозволила змінити паркування ядер (код %lu)%s%s", ra, out.empty() ? "" : ": ", out.c_str());
+    return false;
 }
 
 static bool CoresApply() {
     GUID a;
-    if (!ActiveScheme(a)) return false;
     DWORD ac = 0, dc = 0;
-    PowerReadACValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, &ac);
-    PowerReadDCValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, &dc);
+    if (!ActiveScheme(a) || !CoresRead(ac, dc)) return false;
     lb::StateSave("cores|" + GuidStr(a), std::to_string(ac) + " " + std::to_string(dc));
-    bool ok = PowerWriteACValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, 100) == 0 &&
-              PowerWriteDCValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, 100) == 0;
-    PowerSetActiveScheme(nullptr, &a);  // застосувати зміни
-    return ok;
+    return CoresWrite(100, 100);
 }
 
 static bool CoresRevert() {
@@ -338,10 +371,8 @@ static bool CoresRevert() {
     std::string s;
     unsigned ac = 10, dc = 10;  // типові значення Windows (Збалансована)
     if (lb::StateLoad("cores|" + GuidStr(a), s)) sscanf(s.c_str(), "%u %u", &ac, &dc);
-    bool ok = PowerWriteACValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, ac) == 0 &&
-              PowerWriteDCValueIndex(nullptr, &a, &kSubProcessor, &kCpMinCores, dc) == 0;
-    PowerSetActiveScheme(nullptr, &a);
-    lb::StateDelete("cores|" + GuidStr(a));
+    bool ok = CoresWrite(ac, dc);
+    if (ok) lb::StateDelete("cores|" + GuidStr(a));
     return ok;
 }
 
@@ -512,7 +543,8 @@ const std::vector<Tweak>& All() {
              PowerPlanRevert});
         add({"cores", Cpu, "Тримати всі ядра активними",
              "Вимикає «паркування» ядер: Windows не присипляє ядра процесора під час гри.",
-             "Ноутбуки: вище температура і споживання.", false, false, nullptr, CoresOn, CoresApply, CoresRevert});
+             "Ноутбуки: вище температура і споживання.", false, false, nullptr, CoresOn, CoresApply, CoresRevert,
+             nullptr, CoresUnavailable});
 
         // ---- Відеокарта ----
         add({"refresh", Gpu, "Максимальна частота монітора",
