@@ -322,14 +322,23 @@ static bool CoresRead(DWORD& ac, DWORD& dc) {
     return r == ERROR_SUCCESS;
 }
 
+// Найбільше значення, яке Windows дозволяє для цього налаштування (на деяких ПК — лише 0)
+static DWORD CoresMaxAllowed() {
+    DWORD mx = 100;
+    if (PowerReadValueMax(nullptr, &kSubProcessor, &kCpMinCores, &mx) != ERROR_SUCCESS) mx = 100;
+    return mx;
+}
+
 static bool CoresOn() {
     DWORD ac = 0, dc = 0;
-    return CoresRead(ac, dc) && ac == 100;
+    return CoresMaxAllowed() >= 100 && CoresRead(ac, dc) && ac == 100;
 }
 
 static std::string CoresUnavailable() {
     DWORD ac, dc;
-    return CoresRead(ac, dc) ? "" : "Windows не дає керувати паркуванням ядер на цьому ПК";
+    if (!CoresRead(ac, dc)) return "Windows не дає керувати паркуванням ядер на цьому ПК";
+    if (CoresMaxAllowed() < 100) return "Ядрами керує драйвер процесора — твік не потрібен";
+    return "";
 }
 
 // Запис значень: спершу через API, якщо Windows відмовила — через powercfg; успіх перевіряємо читанням
