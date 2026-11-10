@@ -175,6 +175,48 @@ svg text{font-family:var(--f-body)}
 .base-line{font-size:13px;color:var(--muted)}
 .base-line b{color:var(--ink)}
 footer{color:var(--muted);font-size:12px;text-align:center}
+
+/* Вкладки */
+.tabbar-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:-10px}
+.tabbar{display:flex;gap:4px;border-bottom:1px solid var(--line);min-width:max-content}
+.tabbar button{font:600 14px var(--f-body);color:var(--muted);background:transparent;border:0;border-bottom:3px solid transparent;padding:10px 14px 9px;cursor:pointer;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.tabbar button:hover{color:var(--ink)}
+.tabbar button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tabbar .tn{font:600 11px var(--f-mono);width:20px;height:20px;border-radius:5px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--line);color:var(--muted)}
+.tabbar button[aria-selected="true"] .tn{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.tabbar small{font:500 12px var(--f-body);color:var(--accent)}
+.tabpanel textarea{min-height:170px}
+.hint{color:var(--muted);font-size:13px;margin:0 0 10px;max-width:75ch}
+input[type="text"]{font:14px var(--f-mono);color:var(--ink);background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:7px 10px;width:190px}
+.check{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer}
+.check input{accent-color:var(--accent)}
+/* Бібліотека */
+.lib-row{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;align-items:flex-start}
+.seg{display:flex;flex-wrap:wrap;gap:4px}
+.seg button{font:600 14px var(--f-body);min-width:44px;padding:7px 10px;border-radius:7px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);cursor:pointer}
+.seg.wrap button{font-size:13px;min-width:0}
+.seg button:hover{border-color:var(--accent)}
+.seg button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.lib-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin:6px 0 12px;padding-top:12px;border-top:1px solid var(--line)}
+.lib-head .nm{font:700 28px/1.1 var(--f-display)}
+.lib-head .ds{color:var(--muted)}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+.vc{border:1px solid var(--line);border-radius:9px;background:var(--surface-2);padding:10px 8px;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;min-width:0}
+.vc:hover{border-color:var(--muted)}
+.vc.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;background:var(--accent-soft)}
+.vc .pos{font:600 11px var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.vc .tab{font:13px var(--f-mono)}
+.vc .best{font:600 10px var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--safe)}
+.vc .acts{display:flex;gap:4px;margin-top:2px}
+.vc .ib:hover{border-color:var(--accent);color:var(--accent)}
+.vc.on .box-dot{fill:var(--accent)}
+/* Інтерактивний гриф */
+.fb-name{font:700 26px/1 var(--f-display)}
+.fb-name small{font:500 13px var(--f-mono);color:var(--muted);margin-left:8px}
+.cell{fill:transparent;cursor:pointer}
+.cell:hover{fill:var(--accent);fill-opacity:.18}
+.ghost{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-dasharray:2 2;pointer-events:none}
+.ghost-t{font-size:8px;fill:var(--muted);pointer-events:none}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -194,14 +236,31 @@ footer{color:var(--muted);font-size:12px;text-align:center}
     </div>
   </header>
 
-  <div class="row2">
-    <section class="panel input-panel" aria-labelledby="h-input">
-      <div class="panel-h"><h2 id="h-input">Таби</h2><span class="eyebrow">від низької струни E до високої e</span></div>
+  <section class="panel" aria-labelledby="h-prog">
+    <div class="panel-h"><h2 id="h-prog">Прогресія <span class="eyebrow" id="progCount"></span></h2>
+      <div class="controls" style="margin:0">
+        <div class="ctl"><label for="tuning">Стрій</label><select id="tuning"></select></div>
+        <div class="ctl"><label for="capo">Каподастр</label><select id="capo"></select></div>
+      </div>
+    </div>
+    <div class="strip" id="strip"></div>
+  </section>
+
+  <div class="tabbar-wrap">
+    <nav class="tabbar" role="tablist" aria-label="Розділи" id="tabbar">
+      <button type="button" role="tab" data-tab="tabs" id="t-tabs" aria-controls="tab-tabs"><span class="tn">1</span>Таби</button>
+      <button type="button" role="tab" data-tab="library" id="t-library" aria-controls="tab-library"><span class="tn">2</span>Бібліотека акордів</button>
+      <button type="button" role="tab" data-tab="fretboard" id="t-fretboard" aria-controls="tab-fretboard"><span class="tn">3</span>Гриф</button>
+      <button type="button" role="tab" data-tab="key" id="t-key" aria-controls="tab-key"><span class="tn">4</span>Тональність <small id="tabKeyLbl"></small></button>
+      <button type="button" role="tab" data-tab="artist" id="t-artist" aria-controls="tab-artist"><span class="tn">5</span>Артист</button>
+    </nav>
+  </div>
+
+  <section class="panel tabpanel" id="tab-tabs" role="tabpanel" aria-labelledby="t-tabs">
+    <div class="panel-h"><h2>Пиши таби</h2><span class="eyebrow">від низької струни E до високої e</span></div>
       <label for="tabs" class="eyebrow" style="display:block;margin-bottom:6px">Акорди через «|», пробіл або з нового рядка</label>
       <textarea id="tabs" spellcheck="false"></textarea>
       <div class="controls">
-        <div class="ctl"><label for="tuning">Стрій</label><select id="tuning"></select></div>
-        <div class="ctl"><label for="capo">Каподастр</label><select id="capo"></select></div>
         <div class="ctl"><label for="tabmode">Таб-нотація (6 рядків)</label>
           <select id="tabmode"><option value="col">кожна колонка = акорд</option><option value="bar">кожен такт = акорд</option><option value="block">весь блок = один акорд</option></select></div>
         <button class="btn" id="clear" type="button">Очистити</button>
@@ -218,20 +277,49 @@ footer{color:var(--muted);font-size:12px;text-align:center}
           <li>x — заглушена струна, 0 — відкрита</li>
         </ul>
       </details>
-      <div class="warn" id="warns" hidden></div>
-    </section>
+    <div class="warn" id="warns" hidden></div>
+  </section>
 
-    <section class="panel" aria-labelledby="h-key">
-      <div class="panel-h"><h2 id="h-key">Тональність</h2>
-        <div class="ctl" style="flex-direction:row;align-items:center;gap:6px"><label for="keySel">режим</label><select id="keySel"></select></div>
-      </div>
-      <div id="keyBox"></div>
-    </section>
-  </div>
+  <section class="panel tabpanel" id="tab-library" role="tabpanel" aria-labelledby="t-library" hidden>
+    <div class="panel-h"><h2>Вибери акорд зі списку</h2>
+      <div class="ctl" style="flex-direction:row;align-items:center;gap:8px"><label for="libSearch">або впиши назву</label><input id="libSearch" type="text" placeholder="напр. F#m7, Bb/D" autocomplete="off"></div>
+    </div>
+    <div class="lib-row"><div class="eyebrow">Основний тон</div><div class="seg" id="libRoots"></div></div>
+    <div class="lib-row"><div class="eyebrow">Тип акорду</div><div class="seg wrap" id="libTypes"></div></div>
+    <div class="lib-row"><label class="eyebrow" for="libBass">Бас (обернення)</label><select id="libBass"></select></div>
+    <div class="lib-head" id="libHead"></div>
+    <div class="vgrid" id="libGrid"></div>
+  </section>
 
-  <section class="panel" aria-labelledby="h-prog">
-    <div class="panel-h"><h2 id="h-prog">Прогресія</h2><span class="eyebrow" id="progCount"></span></div>
-    <div class="strip" id="strip"></div>
+  <section class="panel tabpanel" id="tab-fretboard" role="tabpanel" aria-labelledby="t-fretboard" hidden>
+    <div class="panel-h"><h2>Збери акорд на грифі</h2><span class="fb-name" id="fbName">—</span></div>
+    <p class="hint">Натисни на лад, щоб притиснути струну. Ще раз на ту саму точку — заглушити. Ліворуч від порожка: відкрита струна або ×.</p>
+    <div class="scroll" id="fbNeck"></div>
+    <div class="controls">
+      <button class="btn" id="fbPlay" type="button">▶ Зіграти</button>
+      <button class="btn primary" id="fbAdd" type="button">＋ Додати в прогресію</button>
+      <button class="btn" id="fbTake" type="button">Взяти вибраний акорд</button>
+      <button class="btn" id="fbClear" type="button">Очистити</button>
+      <label class="check"><input type="checkbox" id="fbGhost" checked> показувати ноти акорду по всьому грифу</label>
+    </div>
+    <div class="eyebrow subh">Швидкий старт</div>
+    <div class="chips" id="fbPresets" style="margin-top:0"></div>
+  </section>
+
+  <section class="panel tabpanel" id="tab-key" role="tabpanel" aria-labelledby="t-key" hidden>
+    <div class="panel-h"><h2 id="h-key">Тональність</h2>
+      <div class="ctl" style="flex-direction:row;align-items:center;gap:6px"><label for="keySel">режим</label><select id="keySel"></select></div>
+    </div>
+    <div id="keyBox"></div>
+  </section>
+
+  <section class="panel tabpanel" id="tab-artist" role="tabpanel" aria-labelledby="t-artist" hidden>
+    <div class="panel-h">
+      <h2 id="h-artist">Що зіграти далі</h2>
+      <div class="base-line" id="baseLine"></div>
+    </div>
+    <div class="artist-cols" id="artist"></div>
+    <p class="hint" style="margin:14px 0 0">Натисни на картку, щоб послухати й побачити акорд унизу. «＋» додає його в прогресію, і поради рахуються вже від нього.</p>
   </section>
 
   <section class="panel" aria-labelledby="h-detail">
@@ -250,19 +338,11 @@ footer{color:var(--muted);font-size:12px;text-align:center}
     <div class="notes" id="dNotes"></div>
     <div class="eyebrow viz-label">Клавіші піаніно (натисни клавішу, щоб почути)</div>
     <div class="scroll" id="dPiano"></div>
-    <div class="eyebrow viz-label">Гриф гітари</div>
-    <div class="scroll" id="dNeck"></div>
+    <div id="dNeckWrap"><div class="eyebrow viz-label">Гриф гітари</div>
+    <div class="scroll" id="dNeck"></div></div>
   </section>
 
-  <section class="panel" aria-labelledby="h-artist">
-    <div class="panel-h">
-      <h2 id="h-artist">Артист: що зіграти далі</h2>
-      <div class="base-line" id="baseLine"></div>
-    </div>
-    <div class="artist-cols" id="artist"></div>
-  </section>
-
-  <footer>Натисни на картку поради, щоб послухати й побачити її на клавішах. «＋» додає акорд у прогресію, і поради оновлюються вже від нього.</footer>
+  <footer>Акордник · таби → акорди → клавіші піаніно</footer>
 </div>
 
 <script>
@@ -379,7 +459,7 @@ const TUNINGS={
   openg:{n:'Open G (DGDGBD)',m:[38,43,50,55,59,62]},
   opend:{n:'Open D (DADF♯AD)',m:[38,45,50,54,57,62]},
 };
-const S={tuning:'std',capo:0,mode:'col',chords:[],warns:[],sel:-1,preview:null,keyOverride:'auto',keys:[],key:null,playing:-1};
+const S={tab:'tabs',lib:{root:0,suf:'',bass:null,vi:0},fb:[-1,3,2,0,1,0],tuning:'std',capo:0,mode:'col',chords:[],warns:[],sel:-1,preview:null,keyOverride:'auto',keys:[],key:null,playing:-1};
 const tun=()=>TUNINGS[S.tuning].m.map(t=>t+S.capo);
 
 function chordFromPositions(pos){
@@ -392,39 +472,62 @@ function chordFromPositions(pos){
   return {...identify(pcs,bass),bass,pcs,midis,pos:uniq};
 }
 const vCache=new Map();
-function genVoicing(root,suf,bass){
+// Перебирає всі зручні аплікатури акорду на грифі (до 15-го ладу)
+function allVoicings(root,suf,bass){
   const t=tun(); const key=[root,suf,bass,t.join(',')].join('|');
   if(vCache.has(key)) return vCache.get(key);
   const pcs=new Set(TPL[suf].i.map(i=>mod(root+i))); const bpc=bass??root; pcs.add(bpc);
   const need=[...pcs]; const fifth=mod(root+7);
   const minP=need.length<=2?2:need.length===3?3:4;
-  let best=null,bestSc=1e9; const fr=new Array(6);
+  const fr=new Array(6); const found=[];
   const score=()=>{
     const played=[]; for(let s=0;s<6;s++) if(fr[s]>=0) played.push(s);
-    if(played.length<minP) return 1e9;
-    const low=played[0]; if(mod(t[low]+fr[low])!==bpc) return 1e9;
+    if(played.length<minP) return null;
+    const low=played[0]; if(mod(t[low]+fr[low])!==bpc) return null;
     const have=new Set(played.map(s=>mod(t[s]+fr[s])));
-    let miss=0; for(const p of need) if(!have.has(p)){ if(p===fifth&&need.length>=4) miss++; else return 1e9; }
+    let miss=0; for(const p of need) if(!have.has(p)){ if(p===fifth&&need.length>=4) miss++; else return null; }
     const last=played[played.length-1];
     let inner=0; for(let s=low;s<=last;s++) if(fr[s]<0) inner++;
-    if(inner>1) return 1e9;
+    if(inner>1) return null;
     const fretted=played.filter(s=>fr[s]>0).map(s=>fr[s]);
-    let span=0,minF=0,fingers=0;
+    let span=0,minF=0,maxF=0,fingers=0;
     if(fretted.length){
-      minF=Math.min(...fretted); span=Math.max(...fretted)-minF; if(span>3) return 1e9;
+      minF=Math.min(...fretted); maxF=Math.max(...fretted); span=maxF-minF; if(span>3) return null;
       const atMin=fretted.filter(f=>f===minF).length; const above=fretted.length-atMin;
-      fingers=above+(atMin>1?1:atMin); if(fingers>4) return 1e9;
-      if(fretted.length>4){ const fb=played.find(s=>fr[s]===minF); for(let s=fb;s<6;s++) if(fr[s]===0) return 1e9; }
+      fingers=above+(atMin>1?1:atMin); if(fingers>4) return null;
+      if(fretted.length>4){ const fb=played.find(s=>fr[s]===minF); for(let s=fb;s<6;s++) if(fr[s]===0) return null; }
     }
     const opens=played.filter(s=>fr[s]===0).length;
-    const farOpen=minF>=5?opens*2.5:0;
-    return farOpen+low*1.1+(5-last)*2.5+inner*3+minF*.35+span*.5+fingers*.35-opens*.25+miss*1.5+(6-played.length)*.3;
+    if(minF>=5&&opens) return null;
+    const mixed=(opens&&maxF>=4)?opens*1.2:0;
+    const sc=mixed+low*1.1+(5-last)*2.5+inner*3+minF*.45+span*.8+(span===3?1:0)+fingers*.35-opens*.25+miss*1.5+(6-played.length)*.3;
+    return {sc,minF,maxF,opens};
   };
-  for(let st=0;st<=9;st++){
+  const seen=new Set();
+  for(let st=0;st<=12;st++){
     const opts=t.map(o=>{const r=[-1]; const c=[0]; for(let f=Math.max(1,st);f<=st+3;f++) c.push(f); for(const f of c) if(pcs.has(mod(o+f))) r.push(f); return r;});
-    (function rec(s){ if(s===6){const sc=score(); if(sc<bestSc){bestSc=sc;best=fr.slice();} return;} for(const f of opts[s]){fr[s]=f;rec(s+1);} })(0);
+    (function rec(s){ if(s===6){ const k=fr.join(','); if(seen.has(k)) return; seen.add(k); const r=score(); if(r) found.push({fr:fr.slice(),...r}); return;} for(const f of opts[s]){fr[s]=f;rec(s+1);} })(0);
   }
-  vCache.set(key,best); return best;
+  found.sort((a,b)=>a.sc-b.sc);
+  // різноманітність: найкраща аплікатура для кожної позиції на грифі (+ друга для відкритої)
+  const buckets=new Map();
+  for(const v of found){
+    const b=(v.maxF<=4&&v.opens>0)?0:v.minF;
+    if(v.sc>=found[0].sc+7.5) continue;
+    const near=[...buckets.values()].flat().some(u=>u.fr.filter((f,i)=>f!==v.fr[i]).length<=1);
+    const arr=buckets.get(b)||[]; if(!near&&arr.length<2) {arr.push(v); buckets.set(b,arr);}
+  }
+  let list=[...buckets.entries()].sort((a,b)=>a[0]-b[0]).flatMap(([,a])=>a);
+  if(found.length){ list=list.filter(v=>v!==found[0]); list.unshift(found[0]); }
+  list=list.slice(0,12).map(v=>v.fr);
+  vCache.set(key,list); return list;
+}
+function genVoicing(root,suf,bass){ const l=allVoicings(root,suf,bass); return l.length?l[0]:null; }
+function chordWithFrets(sp,fr){
+  const tp=TPL[sp.suf]; const bass=sp.bass??sp.root; const t=tun();
+  const pcs=new Set(tp.i.map(i=>mod(sp.root+i))); pcs.add(bass);
+  const pos=fr.map((f,s)=>({s,f})).filter(p=>p.f>=0);
+  return {root:sp.root,suf:sp.suf,fam:tp.f,bass,pcs,midis:[...new Set(pos.map(p=>t[p.s]+p.f))].sort((a,b)=>a-b),pos,ok:true,no5:false,frets:fr};
 }
 function chordFromSpec(sp){
   const tp=TPL[sp.suf]; const bass=sp.bass??sp.root;
@@ -753,7 +856,7 @@ function analyse(){
   render();
 }
 function current(){ return S.preview?S.preview.chord:(S.chords[S.sel]||null); }
-function render(){ renderStrip(); renderDetail(); renderKey(); renderArtist(); renderWarns(); }
+function render(){ renderStrip(); renderDetail(); renderKey(); renderArtist(); renderWarns(); renderLibrary(); renderFb(); }
 function renderWarns(){ const w=$('#warns'); w.hidden=!S.warns.length; w.innerHTML=S.warns.map(esc).join('<br>'); }
 function renderStrip(){
   const el=$('#strip'); const k=activeKey();
@@ -768,7 +871,8 @@ function renderDetail(){
   const c=current();
   $('#dAdd').hidden=!S.preview;
   if(!c){ $('#dName').textContent='—'; $('#dDesc').textContent='Немає акорду для розбору'; $('#dNotes').innerHTML=''; $('#dPiano').innerHTML=pianoSVG([]); $('#dNeck').innerHTML=neckSVG(null); return; }
-  $('#dName').innerHTML=esc(chordName(c))+(S.preview?'<span class="tag">порада</span>':'');
+  $('#dName').innerHTML=esc(chordName(c))+(S.preview?`<span class="tag">${esc(S.preview.src||'порада')}</span>`:'');
+  $('#dNeckWrap').hidden=S.tab==='fretboard';
   const rn=roman(c,activeKey());
   $('#dDesc').textContent=chordDesc(c)+(rn?` · ${rn} у ${keyName(activeKey())}`:'')+(c.byName?' · аплікатуру підібрано автоматично':'');
   const order=[...c.pcs].sort((a,b)=>mod(a-c.root)-mod(b-c.root));
@@ -780,6 +884,7 @@ function renderDetail(){
 function renderKey(){
   const box=$('#keyBox'); const k=activeKey();
   const sel=$('#keySel'); sel.value=S.keyOverride;
+  $('#tabKeyLbl').textContent=S.chords.length?keyName(k):'';
   let h='';
   if(!S.chords.length){ box.innerHTML='<div class="empty">Додай кілька акордів — тональність визначиться автоматично.</div>'; return; }
   const top=S.keyOverride==='auto'?S.keys[0]:null;
@@ -876,6 +981,87 @@ const EXAMPLES=[
   ['Джазові таби','x5355x | 353433 | x3243x | x0202x'],
 ];
 
+
+/* ===================== Вкладки ===================== */
+const TABS=['tabs','library','fretboard','key','artist'];
+function setTab(t,focus){
+  if(!TABS.includes(t)) t='tabs';
+  S.tab=t;
+  TABS.forEach(x=>{ $('#tab-'+x).hidden=x!==t; const b=$('#t-'+x); b.setAttribute('aria-selected',x===t); b.tabIndex=x===t?0:-1; });
+  if(focus) $('#t-'+t).focus();
+  try{ if(location.hash!=='#'+t) history.replaceState(null,'','#'+t); }catch(e){}
+  if(t==='fretboard') fbUpdate(false); else if(S.preview&&S.preview.src==='з грифа') { S.preview=null; }
+  renderDetail(); renderStrip();
+}
+
+/* ===================== Бібліотека ===================== */
+const LIB_TYPES=['','m','7','maj7','m7','sus2','sus4','5','6','m6','add9','madd9','9','maj9','m9','7sus4','dim','dim7','m7b5','aug','7#5','mMaj7','6/9','7b9','7#9','11','13','add11','maj7#11'];
+const typeLabel=s=>s===''?'мажор':s==='m'?'мінор':s;
+function posLabel(fr){ const f=fr.filter(x=>x>0); if(!f.length) return 'відкриті струни'; const mn=Math.min(...f),mx=Math.max(...f); return (mx<=4&&fr.some(x=>x===0))?'відкрита позиція':mn+'-й лад'; }
+function libChords(){ const L=S.lib; return allVoicings(L.root,L.suf,L.bass??L.root).map(fr=>chordWithFrets({root:L.root,suf:L.suf,bass:L.bass??L.root},fr)); }
+function renderLibrary(){
+  const L=S.lib;
+  $('#libRoots').innerHTML=[...Array(12).keys()].map(r=>`<button type="button" data-root="${r}" aria-pressed="${r===L.root}">${esc(nn(r))}</button>`).join('');
+  $('#libTypes').innerHTML=LIB_TYPES.map(t=>`<button type="button" data-suf="${esc(t)}" aria-pressed="${t===L.suf}">${esc(typeLabel(t))}</button>`).join('');
+  const bs=$('#libBass'); const pcs=TPL[L.suf].i.map(i=>mod(L.root+i));
+  bs.innerHTML=`<option value="">основний тон у басу</option>`+[...Array(12).keys()].filter(p=>p!==L.root).sort((a,b)=>(pcs.includes(b)-pcs.includes(a))||mod(a-L.root)-mod(b-L.root)).map(p=>`<option value="${p}"${L.bass===p?' selected':''}>/${esc(nn(p))}${pcs.includes(p)?' — обернення':''}</option>`).join('');
+  const list=libChords(); S.libList=list;
+  const head=list[0]||chordFromSpec({root:L.root,suf:L.suf,bass:L.bass??L.root});
+  $('#libHead').innerHTML=`<span class="nm">${esc(chordName(head))}</span><span class="ds">${esc(chordDesc(head))} · ноти ${esc([...head.pcs].sort((a,b)=>mod(a-L.root)-mod(b-L.root)).map(nn).join(' '))}</span><span class="eyebrow">${list.length} ${list.length===1?'аплікатура':list.length>=2&&list.length<=4?'аплікатури':'аплікатур'}</span>`;
+  if(!list.length){ $('#libGrid').innerHTML='<div class="empty">Для цього акорду немає зручної аплікатури в цьому строї. Спробуй інший бас або тип.</div>'; return; }
+  $('#libGrid').innerHTML=list.map((c,i)=>`<div class="vc${S.preview&&S.preview.id==='lib'+i&&S.preview.key===libKey()?' on':''}" data-v="${i}" tabindex="0" role="button" aria-label="${esc(chordName(c)+' '+tabStr(c.frets))}">
+    ${i===0?'<span class="best">найзручніша</span>':`<span class="pos">${esc(posLabel(c.frets))}</span>`}
+    ${boxSVG(c.pos)}<span class="tab">${esc(tabStr(c.frets))}</span>
+    <span class="acts"><button class="ib" type="button" data-vplay="${i}" aria-label="Послухати">▶</button><button class="ib" type="button" data-vadd="${i}" aria-label="Додати в прогресію">＋</button></span></div>`).join('');
+}
+const libKey=()=>[S.lib.root,S.lib.suf,S.lib.bass,S.tuning,S.capo].join('|');
+function libPreview(i){ const c=S.libList[i]; if(!c) return; S.preview={id:'lib'+i,key:libKey(),chord:c,chords:[c],src:'з бібліотеки'}; renderLibrary(); renderDetail(); renderStrip(); play(c.midis); }
+
+/* ===================== Гриф-редактор ===================== */
+function fbChord(){ const pos=S.fb.map((f,s)=>({s,f})).filter(p=>p.f>=0); return pos.length?chordFromPositions(pos):null; }
+function fbUpdate(){ const c=fbChord(); if(c){ c.frets=S.fb.slice(); S.preview={id:'fb',chord:c,chords:[c],src:'з грифа'}; } else if(S.preview&&S.preview.id==='fb') S.preview=null; renderFb(); }
+function renderFb(){
+  if(S.tab!=='fretboard') return;
+  const c=fbChord();
+  $('#fbName').innerHTML=c?`${esc(chordName(c))}<small>${esc(tabStr(S.fb))}</small>`:'<small>струни не вибрані</small>';
+  $('#fbAdd').disabled=!c;
+  $('#fbNeck').innerHTML=fbSVG(c,$('#fbGhost').checked);
+}
+function fbSVG(c,ghost){
+  const F=15,L=52,top=22,G=26,FW=56; const w=L+F*FW+14,h=top+5*G+34;
+  const t=tun(); const base=TUNINGS[S.tuning].m;
+  const fx=f=>L+f*FW; const sy=s=>top+(5-s)*G;
+  let s=`<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Інтерактивний гриф">`;
+  s+=`<rect class="neck-bg" x="${L}" y="${top-12}" width="${F*FW}" height="${5*G+24}" rx="3"/>`;
+  [3,5,7,9,15].forEach(f=>s+=`<circle class="inlay" cx="${fx(f-.5)}" cy="${top+2.5*G}" r="6"/>`);
+  s+=`<circle class="inlay" cx="${fx(11.5)}" cy="${top+1.5*G}" r="6"/><circle class="inlay" cx="${fx(11.5)}" cy="${top+3.5*G}" r="6"/>`;
+  for(let f=1;f<=F;f++) s+=`<line class="fret" x1="${fx(f)}" y1="${top-12}" x2="${fx(f)}" y2="${top+5*G+12}"/>`;
+  s+=`<line class="nut" x1="${L}" y1="${top-12}" x2="${L}" y2="${top+5*G+12}"/>`;
+  for(let i=0;i<6;i++) s+=`<line class="str" x1="${L}" y1="${sy(i)}" x2="${L+F*FW}" y2="${sy(i)}" stroke-width="${(2.4-i*.32).toFixed(2)}"/>`;
+  for(let f=1;f<=F;f++) s+=`<text class="fnum" x="${fx(f-.5)}" y="${h-8}" text-anchor="middle">${f}</text>`;
+  for(let i=0;i<6;i++) s+=`<text class="fnum" x="4" y="${sy(i)+4}">${esc(nn(base[i]))}</text>`;
+  if(ghost&&c){
+    for(let i=0;i<6;i++) for(let f=0;f<=F;f++){
+      if(S.fb[i]===f) continue; const m=t[i]+f; if(!c.pcs.has(mod(m))) continue;
+      const x=f===0?L-16:fx(f-.5);
+      s+=`<circle class="ghost" cx="${x}" cy="${sy(i)}" r="9"/><text class="ghost-t" x="${x}" y="${sy(i)+3}" text-anchor="middle">${esc(nn(m))}</text>`;
+    }
+  }
+  const bm=c?Math.min(...c.midis):null;
+  for(let i=0;i<6;i++){
+    const f=S.fb[i];
+    if(f<0) s+=`<text class="mute" x="${L-16}" y="${sy(i)+4}" text-anchor="middle">×</text>`;
+    else { const m=t[i]+f; const x=f===0?L-16:fx(f-.5);
+      s+= f===0?`<circle class="dot-open" cx="${x}" cy="${sy(i)}" r="10"/><text class="dlab-open" x="${x}" y="${sy(i)+3.5}" text-anchor="middle">${esc(nn(m))}</text>`
+               :`<circle class="dot${m===bm?' bass':''}" cx="${x}" cy="${sy(i)}" r="11"/><text class="dlab" x="${x}" y="${sy(i)+3.5}" text-anchor="middle">${esc(nn(m))}</text>`; }
+    // клікабельні зони поверх усього
+    s+=`<rect class="cell" data-s="${i}" data-f="0" x="${L-30}" y="${sy(i)-G/2}" width="30" height="${G}"><title>${esc(nn(base[i]))}-струна: відкрита / заглушена</title></rect>`;
+    for(let ff=1;ff<=F;ff++) s+=`<rect class="cell" data-s="${i}" data-f="${ff}" x="${fx(ff-1)}" y="${sy(i)-G/2}" width="${FW}" height="${G}"/>`;
+  }
+  return s+'</svg>';
+}
+const FB_PRESETS=[['C','x32010'],['G','320003'],['D','xx0232'],['Am','x02210'],['Em','022000'],['E','022100'],['F (баре)','133211'],['Bm (баре)','x24432'],['Порожньо','xxxxxx']];
+
 /* ===================== Ініціалізація ===================== */
 function init(){
   $('#tuning').innerHTML=Object.entries(TUNINGS).map(([k,v])=>`<option value="${k}">${v.n}</option>`).join('');
@@ -898,7 +1084,7 @@ function init(){
   $('#stopAll').addEventListener('click',stopAll);
   $('#dStrum').addEventListener('click',()=>{const c=current(); if(c) play(c.midis);});
   $('#dArp').addEventListener('click',()=>{const c=current(); if(c) play(c.midis,'arp');});
-  $('#dAdd').addEventListener('click',()=>{ if(S.preview) appendChords(S.sug[S.preview.id]); });
+  $('#dAdd').addEventListener('click',()=>{ if(S.preview) appendChords(S.preview.chords||[S.preview.chord]); });
   $('#dPiano').addEventListener('click',e=>{const r=e.target.closest('[data-m]'); if(r) play([+r.dataset.m]);});
 
   const strip=$('#strip');
@@ -912,14 +1098,45 @@ function init(){
     const p=e.target.closest('[data-prog]'); if(p) loadProg(+p.dataset.prog);
   });
   const art=$('#artist');
-  const preview=id=>{ const chs=S.sug[id]; S.preview={id,chord:chs[0]}; renderDetail(); renderStrip(); art.querySelectorAll('.sg').forEach(x=>x.classList.toggle('previewing',x.dataset.sg===id)); playSeq(chs); };
+  const preview=id=>{ const chs=S.sug[id]; S.preview={id,chord:chs[0],chords:chs,src:'порада'}; renderDetail(); renderStrip(); art.querySelectorAll('.sg').forEach(x=>x.classList.toggle('previewing',x.dataset.sg===id)); playSeq(chs); };
   art.addEventListener('click',e=>{
     const a=e.target.closest('[data-addsg]'); if(a){ e.stopPropagation(); appendChords(S.sug[a.dataset.addsg]); return; }
     const p=e.target.closest('[data-play]'); if(p){ e.stopPropagation(); playSeq(S.sug[p.dataset.play]); return; }
     const c=e.target.closest('[data-sg]'); if(c) preview(c.dataset.sg);
   });
   art.addEventListener('keydown',e=>{ if(e.key!=='Enter'&&e.key!==' ') return; const c=e.target.closest('[data-sg]'); if(c&&e.target===c){e.preventDefault();preview(c.dataset.sg);} });
+  // вкладки
+  $('#tabbar').addEventListener('click',e=>{const b=e.target.closest('[data-tab]'); if(b) setTab(b.dataset.tab);});
+  $('#tabbar').addEventListener('keydown',e=>{ const i=TABS.indexOf(S.tab); if(e.key==='ArrowRight') setTab(TABS[(i+1)%TABS.length],true); else if(e.key==='ArrowLeft') setTab(TABS[(i+TABS.length-1)%TABS.length],true); });
+  window.addEventListener('hashchange',()=>setTab(location.hash.slice(1)));
+  // бібліотека
+  $('#libRoots').addEventListener('click',e=>{const b=e.target.closest('[data-root]'); if(!b) return; S.lib.root=+b.dataset.root; S.lib.bass=null; renderLibrary(); libPreview(0);});
+  $('#libTypes').addEventListener('click',e=>{const b=e.target.closest('[data-suf]'); if(!b) return; S.lib.suf=b.dataset.suf; S.lib.bass=null; renderLibrary(); libPreview(0);});
+  $('#libBass').addEventListener('change',e=>{ S.lib.bass=e.target.value===''?null:+e.target.value; renderLibrary(); libPreview(0);});
+  $('#libSearch').addEventListener('input',e=>{ const sp=parseName(e.target.value.trim()); e.target.style.borderColor=e.target.value&&!sp?'var(--home)':''; if(!sp) return; S.lib={root:sp.root,suf:sp.suf,bass:sp.bass===sp.root?null:sp.bass}; renderLibrary(); libPreview(0); });
+  const lg=$('#libGrid');
+  lg.addEventListener('click',e=>{
+    const a=e.target.closest('[data-vadd]'); if(a){ appendChords([S.libList[+a.dataset.vadd]]); return; }
+    const p=e.target.closest('[data-vplay]'); if(p){ play(S.libList[+p.dataset.vplay].midis); return; }
+    const v=e.target.closest('[data-v]'); if(v) libPreview(+v.dataset.v);
+  });
+  lg.addEventListener('keydown',e=>{ if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-v]')){ e.preventDefault(); libPreview(+e.target.dataset.v);} });
+  // гриф
+  $('#fbNeck').addEventListener('click',e=>{
+    const r=e.target.closest('[data-s]'); if(!r) return; const s=+r.dataset.s, f=+r.dataset.f;
+    S.fb[s] = S.fb[s]===f ? -1 : f;
+    fbUpdate(); renderDetail(); renderStrip();
+    if(S.fb[s]>=0) play([tun()[s]+S.fb[s]]);
+  });
+  $('#fbGhost').addEventListener('change',renderFb);
+  $('#fbPlay').addEventListener('click',()=>{const c=fbChord(); if(c) play(c.midis);});
+  $('#fbAdd').addEventListener('click',()=>{const c=fbChord(); if(c){ c.frets=S.fb.slice(); appendChords([c]); fbUpdate(false); renderDetail(); }});
+  $('#fbClear').addEventListener('click',()=>{S.fb=[-1,-1,-1,-1,-1,-1]; fbUpdate(); renderDetail(); renderStrip();});
+  $('#fbTake').addEventListener('click',()=>{const c=S.chords[S.sel]; const fr=c&&fretsOf(c); if(fr){S.fb=fr.slice(); fbUpdate(); renderDetail(); renderStrip(); play(c.midis);} });
+  $('#fbPresets').innerHTML=FB_PRESETS.map(([n,t],i)=>`<button type="button" class="chip" data-fbp="${i}">${esc(n)} <span style="font-family:var(--f-mono)">${t}</span></button>`).join('');
+  $('#fbPresets').addEventListener('click',e=>{const b=e.target.closest('[data-fbp]'); if(!b) return; S.fb=parseCompact(FB_PRESETS[+b.dataset.fbp][1]); fbUpdate(); renderDetail(); renderStrip(); const c=fbChord(); if(c) play(c.midis);});
   analyse();
+  setTab(location.hash.slice(1)||'tabs');
 }
 function playSeq(chs){ chs.forEach((c,i)=>setTimeout(()=>play(c.midis),i*900)); }
 init();
