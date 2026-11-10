@@ -1,0 +1,6 @@
+out/
+android/build/
+android/.tools/
+android/.keystore/
+windows/www/
+windows/rsrc_windows_amd64.syso
