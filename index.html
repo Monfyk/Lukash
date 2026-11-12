@@ -252,6 +252,21 @@ input[type="text"]{font:14px var(--f-mono);color:var(--ink);background:var(--sur
 .mb-blue{fill:var(--spice)}
 .lg{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin-top:8px}
 .lg i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+
+/* Налаштування звуку */
+.snd{position:relative}
+.snd>summary{list-style:none}
+.snd>summary::-webkit-details-marker{display:none}
+.snd>summary::after{content:"▾";font-size:11px;margin-left:2px}
+.snd[open]>summary{border-color:var(--accent)}
+.snd-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:min(320px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 30px rgb(0 0 0 / .18)}
+.snd-panel select,.snd-panel input[type=range]{width:100%}
+.snd-panel input[type=range]{accent-color:var(--accent)}
+.snd-panel b{color:var(--ink);font-variant-numeric:tabular-nums}
+.ctxb{justify-content:center;width:100%;border-color:var(--c);color:var(--c);background:transparent}
+.ctxb:hover{background:var(--surface)}
+.sg.playing{border-color:var(--home);box-shadow:0 0 0 2px var(--home) inset}
+@media (max-width:640px){.snd[open]{flex-basis:100%}.snd-panel{position:static;width:100%;margin-top:8px;box-shadow:none}}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -268,6 +283,17 @@ input[type="text"]{font:14px var(--f-mono);color:var(--ink);background:var(--sur
     <div class="controls" style="margin:0">
       <button class="btn primary" id="playAll" type="button">▶ Програти прогресію</button>
       <button class="btn" id="stopAll" type="button" hidden>■ Стоп</button>
+      <details class="snd" id="sndBox">
+        <summary class="btn">Звук і ритм</summary>
+        <div class="snd-panel">
+          <div class="ctl"><label for="sndInst">Інструмент</label><select id="sndInst"></select></div>
+          <div class="ctl"><label for="sndStyle">Як грати прогресію</label><select id="sndStyle"></select></div>
+          <div class="ctl"><label for="sndBpm">Темп: <b id="sndBpmV"></b> уд/хв</label><input type="range" id="sndBpm" min="50" max="180" step="2"></div>
+          <div class="ctl"><label for="sndBeats">Довжина акорду</label><select id="sndBeats"><option value="2">2 долі (пів такту)</option><option value="4">4 долі (такт)</option><option value="8">8 доль (два такти)</option></select></div>
+          <div class="ctl"><label for="sndVol">Гучність</label><input type="range" id="sndVol" min="0" max="1" step="0.05"></div>
+          <button class="btn" type="button" id="sndTest">▶ Перевірити звук</button>
+        </div>
+      </details>
     </div>
   </header>
 
@@ -385,6 +411,7 @@ input[type="text"]{font:14px var(--f-mono);color:var(--ink);background:var(--sur
       <div class="controls" style="margin:0">
         <button class="btn" id="dStrum" type="button">▶ Зіграти</button>
         <button class="btn" id="dArp" type="button">Арпеджіо</button>
+        <button class="btn" id="dCtx" type="button" hidden>▶ Послухати в прогресії</button>
         <button class="btn" id="dAdd" type="button" hidden>＋ Додати в прогресію</button>
       </div>
     </div>
@@ -803,31 +830,171 @@ function suggest(cur,k){
 const mod7=n=>((n%7)+7)%7;
 
 /* ===================== Звук ===================== */
-let actx=null;
-function ac(){ if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume(); return actx; }
-function pluck(m,when,len=2.2,vol=.22){
-  const c=ac(); const f=440*Math.pow(2,(m-69)/12);
-  const g=c.createGain(); const lp=c.createBiquadFilter(); lp.type='lowpass';
-  lp.frequency.setValueAtTime(Math.min(6000,f*8),when); lp.frequency.exponentialRampToValueAtTime(Math.max(300,f*1.5),when+len*.6);
-  g.gain.setValueAtTime(0.0001,when); g.gain.exponentialRampToValueAtTime(vol,when+.006); g.gain.exponentialRampToValueAtTime(0.0001,when+len);
-  const o1=c.createOscillator(); o1.type='triangle'; o1.frequency.value=f;
-  const o2=c.createOscillator(); o2.type='sawtooth'; o2.frequency.value=f*1.002; const g2=c.createGain(); g2.gain.value=.18;
-  o1.connect(g); o2.connect(g2).connect(g); g.connect(lp).connect(c.destination);
-  o1.start(when); o2.start(when); o1.stop(when+len+.05); o2.stop(when+len+.05);
+// Гітара синтезується алгоритмом Карплуса — Стронга (затухаюча «струна» з шуму),
+// далі — фільтри корпусу / підсилювача і легка реверберація. Нічого не завантажується.
+const INSTRUMENTS={
+  acoustic:{n:'Акустична гітара',ks:true,t60:[5.5,1.6],soft:1,pick:.13,vol:.55},
+  nylon:{n:'Класична (нейлон)',ks:true,t60:[3.6,1.2],soft:3,pick:.18,vol:.65},
+  electric:{n:'Електрогітара (чиста)',ks:true,t60:[7,2.4],soft:2,pick:.09,vol:.5},
+  drive:{n:'Електрогітара (овердрайв)',ks:true,t60:[7,2.6],soft:1,pick:.1,vol:.32},
+  piano:{n:'Піаніно',ks:false,vol:.42},
+  synth:{n:'Синтезатор',ks:false,vol:.5},
+};
+const STYLES={hit:'Один удар на акорд',strum:'Ритм-бій (вниз-вниз-вгору…)',arp:'Перебір (арпеджіо)'};
+const SND={inst:'acoustic',style:'strum',bpm:92,beats:4,vol:.8};
+try{ Object.assign(SND,JSON.parse(localStorage.getItem('akordnyk-sound')||'{}')); }catch(e){}
+if(!INSTRUMENTS[SND.inst]) SND.inst='acoustic'; if(!STYLES[SND.style]) SND.style='strum';
+const saveSnd=()=>{ try{ localStorage.setItem('akordnyk-sound',JSON.stringify(SND)); }catch(e){} };
+
+let actx=null,master=null,comp=null;
+function ac(){
+  if(!actx){ actx=new (window.AudioContext||window.webkitAudioContext)();
+    comp=actx.createDynamicsCompressor(); comp.threshold.value=-14; comp.ratio.value=4; comp.connect(actx.destination);
+    master=actx.createGain(); master.gain.value=SND.vol; master.connect(comp); }
+  if(actx.state==='suspended') actx.resume();
+  return actx;
 }
-function play(midis,style='strum'){
-  if(!midis||!midis.length) return; const c=ac(); const now=c.currentTime+.02;
-  const vol=Math.min(.22,.6/midis.length);
-  midis.forEach((m,i)=>pluck(m,now+(style==='arp'?i*.18:i*.028),style==='arp'?2.6:2.2,vol));
+const buses={};
+function reverbIR(c,sec){
+  const len=Math.floor(c.sampleRate*sec), b=c.createBuffer(2,len,c.sampleRate);
+  for(let ch=0;ch<2;ch++){ const d=b.getChannelData(ch); for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,3.2); }
+  return b;
 }
-let playTimer=null;
+function bus(name){
+  if(buses[name]) return buses[name];
+  const c=ac(); const input=c.createGain(); let x=input;
+  const chain=(n)=>{ x.connect(n); x=n; return n; };
+  const filt=(type,f,g,q)=>{ const b=c.createBiquadFilter(); b.type=type; b.frequency.value=f; if(g!=null) b.gain.value=g; if(q!=null) b.Q.value=q; return chain(b); };
+  if(name==='acoustic'){ filt('peaking',105,5,1.2); filt('peaking',230,3,1.4); filt('peaking',2600,2,1); filt('highshelf',6000,-4); }
+  else if(name==='nylon'){ filt('peaking',120,4,1); filt('lowpass',4200,null,.7); }
+  else if(name==='electric'){ filt('lowpass',3600,null,.8); filt('peaking',900,2,1); }
+  else if(name==='drive'){
+    const pre=c.createGain(); pre.gain.value=7; chain(pre);
+    const ws=c.createWaveShaper(); const k=new Float32Array(1024); for(let i=0;i<1024;i++){ const v=i/511.5-1; k[i]=Math.tanh(2.2*v); } ws.curve=k; ws.oversample='4x'; chain(ws);
+    filt('lowpass',3800,null,.9); filt('peaking',1600,4,1.2); filt('highpass',90,null,.7);
+  } else if(name==='piano'){ filt('lowpass',5200,null,.6); }
+  const out=c.createGain(); out.gain.value=INSTRUMENTS[name].vol; chain(out); out.connect(master);
+  const rv=c.createConvolver(); rv.buffer=reverbIR(c,name==='piano'?2.2:1.6); const wet=c.createGain(); wet.gain.value=name==='drive'?.12:.22;
+  out.connect(rv); rv.connect(wet); wet.connect(master);
+  return buses[name]={input};
+}
+const ksCache=new Map();
+function ksVoice(m,instName){
+  const key=instName+':'+m; if(ksCache.has(key)) return ksCache.get(key);
+  const c=ac(), sr=c.sampleRate, I=INSTRUMENTS[instName];
+  const f=440*Math.pow(2,(m-69)/12);
+  const N=Math.max(4,Math.round(sr/f+.5)); const f0=sr/(N-.5);   // точний тон добираємо playbackRate
+  const k=Math.min(1,Math.max(0,(m-40)/45)); const t60=I.t60[0]+(I.t60[1]-I.t60[0])*k;
+  const g=Math.pow(10,-3/(t60*f0));
+  const dur=Math.min(t60,6), len=Math.floor(sr*dur);
+  const buf=c.createBuffer(1,len,sr), d=buf.getChannelData(0);
+  let ring=new Float32Array(N); for(let i=0;i<N;i++) ring[i]=Math.random()*2-1;
+  const P=Math.max(1,Math.round(N*I.pick)); const ex=new Float32Array(N);   // позиція щипка
+  for(let i=0;i<N;i++) ex[i]=ring[i]-ring[(i+P)%N];
+  for(let s=0;s<I.soft;s++) for(let i=1;i<N;i++) ex[i]=.5*(ex[i]+ex[i-1]);  // м'якість атаки
+  let mx=0; for(let i=0;i<N;i++) mx=Math.max(mx,Math.abs(ex[i])); for(let i=0;i<N;i++) ex[i]/=mx||1;
+  ring=ex; let idx=0;
+  for(let i=0;i<len;i++){ const a=ring[idx], b=ring[(idx+1)%N]; d[i]=a; ring[idx]=g*.5*(a+b); idx=(idx+1)%N; }
+  const fade=Math.floor(sr*.05); for(let i=0;i<fade;i++) d[len-1-i]*=i/fade;
+  const v={buf,rate:f/f0}; ksCache.set(key,v); return v;
+}
+const live=[];   // усі заплановані джерела, щоб «Стоп» міг їх зупинити
+function track(src,end){ live.push(src); src.onended=()=>{ const i=live.indexOf(src); if(i>=0) live.splice(i,1); }; }
+function note(m,t,vel,dest){
+  const c=ac(); const inst=SND.inst, I=INSTRUMENTS[inst]; dest=dest||bus(inst).input;
+  if(I.ks){
+    const v=ksVoice(m,inst); const s=c.createBufferSource(); s.buffer=v.buf; s.playbackRate.value=v.rate;
+    const g=c.createGain(); g.gain.value=vel; s.connect(g).connect(dest); s.start(t); track(s);
+  } else if(inst==='piano'){
+    const f=440*Math.pow(2,(m-69)/12); const g=c.createGain(); g.connect(dest);
+    const len=Math.max(1.4,4.5-(m-48)*.05);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vel*.5,t+.008); g.gain.exponentialRampToValueAtTime(vel*.18,t+.4); g.gain.exponentialRampToValueAtTime(0.0001,t+len);
+    [1,2,3,4,5,6].forEach(h=>{ const fh=f*h*Math.sqrt(1+.0004*h*h); if(fh>12000) return;
+      const o=c.createOscillator(); o.type='sine'; o.frequency.value=fh; const og=c.createGain(); og.gain.value=1/Math.pow(h,1.6);
+      if(h>1){ og.gain.setValueAtTime(1/Math.pow(h,1.6),t); og.gain.exponentialRampToValueAtTime(.0005,t+len/(h*.8)); }
+      o.connect(og).connect(g); o.start(t); o.stop(t+len+.05); track(o); });
+  } else {
+    const f=440*Math.pow(2,(m-69)/12), len=2.2;
+    const g=c.createGain(); const lp=c.createBiquadFilter(); lp.type='lowpass';
+    lp.frequency.setValueAtTime(Math.min(6000,f*8),t); lp.frequency.exponentialRampToValueAtTime(Math.max(300,f*1.5),t+len*.6);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vel*.5,t+.006); g.gain.exponentialRampToValueAtTime(0.0001,t+len);
+    const o1=c.createOscillator(); o1.type='triangle'; o1.frequency.value=f;
+    const o2=c.createOscillator(); o2.type='sawtooth'; o2.frequency.value=f*1.002; const g2=c.createGain(); g2.gain.value=.18;
+    o1.connect(g); o2.connect(g2).connect(g); g.connect(lp).connect(dest);
+    o1.start(t); o2.start(t); o1.stop(t+len+.05); o2.stop(t+len+.05); track(o1); track(o2);
+  }
+}
+// Група звучання акорду: наступний удар глушить попередній, як рука на струнах
+let lastGroup=null;
+function group(t){
+  const c=ac(); const g=c.createGain(); g.connect(bus(SND.inst).input);
+  if(lastGroup){ lastGroup.gain.setValueAtTime(1,Math.max(c.currentTime,t-.005)); lastGroup.gain.setTargetAtTime(0,t,.035); }
+  lastGroup=g; return g;
+}
+function strum(midis,t,dir,vel,spread){
+  const ms=[...new Set(midis)].sort((a,b)=>a-b); if(!ms.length) return;
+  const g=group(t);
+  const seq=dir==='up'?ms.slice(-Math.min(4,ms.length)).reverse():ms;
+  const per=Math.min(.6,1.6/Math.sqrt(ms.length));
+  seq.forEach((m,i)=>note(m,t+i*spread+Math.random()*.004,vel*per*(dir==='up'?1:1-i*.03),g));
+}
+// Як звучить один акорд протягом такту згідно з налаштуваннями
+function schedChord(midis,t,bar){
+  const st=SND.style, e8=60/SND.bpm/2, n8=Math.round(bar/e8);
+  if(st==='hit'){ strum(midis,t,'down',.95,.024); return; }
+  if(st==='strum'){
+    const pat='D.DU.UDU';
+    for(let i=0;i<n8;i++){ const p=pat[i%8]; if(p==='.') continue;
+      strum(midis,t+i*e8,p==='D'?'down':'up',p==='D'?(i%8===0?.95:.8):.55,p==='D'?.014:.011); }
+    return;
+  }
+  const ms=[...new Set(midis)].sort((a,b)=>a-b); const g=group(t); const up=ms.slice(1);
+  const order=[0,...up.map((_,i)=>i+1),...up.slice(0,-1).map((_,i)=>up.length-1-i)];
+  for(let i=0;i<n8;i++){ const k=order[i%order.length]; note(ms[k],t+i*e8,(i===0?.9:.65)*.6,g); }
+}
+// Короткий програш одного акорду (кліки по картках, піаніно, гриф)
+function play(midis,style){
+  if(!midis||!midis.length) return; const c=ac(); const t=c.currentTime+.03;
+  if(style==='arp'){ const ms=[...new Set(midis)].sort((a,b)=>a-b); const g=group(t); ms.forEach((m,i)=>note(m,t+i*.18,.55,g)); }
+  else if(midis.length===1){ note(midis[0],t,.7,group(t)); }
+  else strum(midis,t,'down',.95,.022);
+}
+
+/* --- Послідовності: прогресія, прогресія + порада --- */
+let seqTimers=[];
+function stopAll(){
+  seqTimers.forEach(clearTimeout); seqTimers=[];
+  if(actx){ const t=actx.currentTime; live.splice(0).forEach(s=>{ try{s.stop(t+.02);}catch(e){} }); if(lastGroup){ lastGroup.gain.setTargetAtTime(0,t,.02); lastGroup=null; } }
+  S.playing=-1; S.sugPlaying=null;
+  $('#playAll').hidden=false; $('#stopAll').hidden=true;
+  document.querySelectorAll('.sg.playing').forEach(x=>x.classList.remove('playing'));
+  renderStrip();
+}
+function playSequence(items){
+  stopAll(); if(!items.length) return;
+  const c=ac(); const bar=SND.beats*60/SND.bpm; let t=c.currentTime+.12;
+  $('#playAll').hidden=true; $('#stopAll').hidden=false;
+  items.forEach(it=>{ schedChord(it.midis,t,bar); const ms=(t-c.currentTime)*1000; seqTimers.push(setTimeout(()=>it.onStart&&it.onStart(),Math.max(0,ms))); t+=bar; });
+  const ms=(t-c.currentTime)*1000; seqTimers.push(setTimeout(()=>{ S.playing=-1; S.sugPlaying=null; $('#playAll').hidden=false; $('#stopAll').hidden=true; document.querySelectorAll('.sg.playing').forEach(x=>x.classList.remove('playing')); renderStrip(); },ms+200));
+}
 function playAll(){
-  stopAll(); if(!S.chords.length) return;
-  let i=0; $('#playAll').hidden=true; $('#stopAll').hidden=false;
-  const step=()=>{ if(i>=S.chords.length){stopAll();return;} S.playing=i; S.sel=i; S.preview=null; play(S.chords[i].midis); render(); i++; playTimer=setTimeout(step,1100); };
-  step();
+  if(!S.chords.length) return;
+  playSequence(S.chords.map((c,i)=>({midis:c.midis,onStart:()=>{ S.playing=i; S.sel=i; S.preview=null; render(); }})));
 }
-function stopAll(){ clearTimeout(playTimer); playTimer=null; S.playing=-1; $('#playAll').hidden=false; $('#stopAll').hidden=true; renderStrip(); }
+// Кілька акордів прогресії до вибраного (включно) + запропоновані акорди
+function playWithProgression(chs,sgId){
+  const end=S.sel>=0?S.sel:S.chords.length-1;
+  const ctx=S.chords.slice(Math.max(0,end-3),end+1); const first=Math.max(0,end-3);
+  const items=ctx.map((c,i)=>({midis:c.midis,onStart:()=>{ S.playing=first+i; renderStrip(); }}));
+  chs.forEach((c,i)=>items.push({midis:c.midis,onStart:()=>{
+    S.playing=-1; renderStrip();
+    document.querySelectorAll('.sg.playing').forEach(x=>x.classList.remove('playing'));
+    if(sgId){ const el=document.querySelector(`.sg[data-sg="${sgId}"]`); if(el) el.classList.add('playing'); }
+    if(sgId) S.preview={id:sgId,chord:c,chords:chs,src:'порада'};
+    renderDetail();
+  }}));
+  playSequence(items);
+}
 
 /* ===================== SVG ===================== */
 const NS='http://www.w3.org/2000/svg';
@@ -925,7 +1092,7 @@ function renderStrip(){
 }
 function renderDetail(){
   const c=current();
-  $('#dAdd').hidden=!S.preview;
+  $('#dAdd').hidden=!S.preview; $('#dCtx').hidden=!S.preview||!S.chords.length;
   if(!c){ $('#dName').textContent='—'; $('#dDesc').textContent='Немає акорду для розбору'; $('#dNotes').innerHTML=''; $('#dPiano').innerHTML=pianoSVG([]); $('#dNeck').innerHTML=neckSVG(null); return; }
   $('#dName').innerHTML=esc(chordName(c))+(S.preview?`<span class="tag">${esc(S.preview.src||'порада')}</span>`:'');
   $('#dNeckWrap').hidden=S.tab==='fretboard';
@@ -994,13 +1161,15 @@ function renderArtist(){
         S.sug[id]=chs;
         h+=`<div class="sg${S.preview&&S.preview.id===id?' previewing':''}" data-sg="${id}" tabindex="0" role="button"><div class="sg-top"><span class="sg-name">${esc(chs.map(chordName).join(' → '))}</span></div>
           <div class="sg-rn">${esc(chs.map(c=>roman(c,k)).join(' → '))}</div><div class="sg-why">${esc(it.why)}</div>
-          <div class="sg-bot"><span class="sg-tab">${esc(chs.map(c=>tabStr(c.frets)).join(' · '))}</span><span class="sg-btns"><button class="ib" type="button" data-play="${id}" aria-label="Послухати">▶</button><button class="ib" type="button" data-addsg="${id}" aria-label="Додати">＋</button></span></div></div>`;
+          <div class="sg-bot"><span class="sg-tab">${esc(chs.map(c=>tabStr(c.frets)).join(' · '))}</span><span class="sg-btns"><button class="ib" type="button" data-play="${id}" aria-label="Послухати">▶</button><button class="ib" type="button" data-addsg="${id}" aria-label="Додати">＋</button></span></div>
+          <button class="btn sm ctxb" type="button" data-ctx="${id}">▶ Послухати в прогресії</button></div>`;
       } else {
         const c=chordFromSpec(it.sp); S.sug[id]=[c];
         h+=`<div class="sg${S.preview&&S.preview.id===id?' previewing':''}" data-sg="${id}" tabindex="0" role="button"><div class="sg-top"><span class="sg-name">${esc(chordName(c))}</span><span class="sg-rn">${esc(roman(c,k))}</span></div>
           <div class="sg-why">${esc(it.why)}</div>
           ${pianoSVG([...c.pcs].map(p=>60+p),60,83,true)}
-          <div class="sg-bot"><span class="sg-tab">${esc(tabStr(c.frets))}</span><span class="sg-btns"><button class="ib" type="button" data-play="${id}" aria-label="Послухати">▶</button><button class="ib" type="button" data-addsg="${id}" aria-label="Додати">＋</button></span></div></div>`;
+          <div class="sg-bot"><span class="sg-tab">${esc(tabStr(c.frets))}</span><span class="sg-btns"><button class="ib" type="button" data-play="${id}" aria-label="Послухати">▶</button><button class="ib" type="button" data-addsg="${id}" aria-label="Додати">＋</button></span></div>
+          <button class="btn sm ctxb" type="button" data-ctx="${id}">▶ Послухати в прогресії</button></div>`;
       }
     });
     h+='</div>';
@@ -1237,7 +1406,7 @@ function playScale(){
   if(S.scale.box>=0) ms=[...new Set(boxes[S.scale.box].notes.map(n=>n.m))].sort((a,b)=>a-b);
   else { const t0=tun()[0]+mod(it.tonic-tun()[0]); ms=SCALES[it.id].i.map(v=>t0+v).concat([t0+12]); }
   const seq=ms.concat(ms.slice(0,-1).reverse()); const c=ac(); const now=c.currentTime+.05;
-  seq.forEach((m,i)=>pluck(m,now+i*.17,.6,.2));
+  const g=group(now); seq.forEach((m,i)=>note(m,now+i*.17,.6,g));
 }
 
 /* ===================== Ініціалізація ===================== */
@@ -1259,9 +1428,21 @@ function init(){
   $('#clear').addEventListener('click',()=>{$('#tabs').value='';S.preview=null;analyse();$('#tabs').focus();});
   $('#examples').addEventListener('click',e=>{const b=e.target.closest('[data-ex]'); if(!b) return; const ex=EXAMPLES[+b.dataset.ex][1]; if(ex.includes('e|')) {S.mode='col';$('#tabmode').value='col';} $('#tabs').value=ex; S.sel=-1;S.preview=null;S.keyOverride='auto';analyse();});
   $('#playAll').addEventListener('click',playAll);
+  $('#sndInst').innerHTML=Object.entries(INSTRUMENTS).map(([k,v])=>`<option value="${k}">${v.n}</option>`).join('');
+  $('#sndStyle').innerHTML=Object.entries(STYLES).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+  const sndSync=()=>{ $('#sndInst').value=SND.inst; $('#sndStyle').value=SND.style; $('#sndBpm').value=SND.bpm; $('#sndBpmV').textContent=SND.bpm; $('#sndBeats').value=SND.beats; $('#sndVol').value=SND.vol; };
+  sndSync();
+  $('#sndInst').addEventListener('change',e=>{ stopAll(); SND.inst=e.target.value; saveSnd(); const c=current(); play(c?c.midis:[48,52,55,60,64]); });
+  $('#sndStyle').addEventListener('change',e=>{ SND.style=e.target.value; saveSnd(); });
+  $('#sndBpm').addEventListener('input',e=>{ SND.bpm=+e.target.value; $('#sndBpmV').textContent=SND.bpm; saveSnd(); });
+  $('#sndBeats').addEventListener('change',e=>{ SND.beats=+e.target.value; saveSnd(); });
+  $('#sndVol').addEventListener('input',e=>{ SND.vol=+e.target.value; if(master) master.gain.value=SND.vol; saveSnd(); });
+  $('#sndTest').addEventListener('click',()=>{ const c=current(); const m=c?c.midis:[40,47,52,56,59,64]; playSequence([{midis:m}]); });
+  document.addEventListener('click',e=>{ const d=$('#sndBox'); if(d.open&&!d.contains(e.target)) d.open=false; });
   $('#stopAll').addEventListener('click',stopAll);
   $('#dStrum').addEventListener('click',()=>{const c=current(); if(c) play(c.midis);});
   $('#dArp').addEventListener('click',()=>{const c=current(); if(c) play(c.midis,'arp');});
+  $('#dCtx').addEventListener('click',()=>{ if(S.preview) playWithProgression(S.preview.chords||[S.preview.chord],S.preview.src==='порада'?S.preview.id:null); });
   $('#dAdd').addEventListener('click',()=>{ if(S.preview) appendChords(S.preview.chords||[S.preview.chord]); });
   $('#dPiano').addEventListener('click',e=>{const r=e.target.closest('[data-m]'); if(r) play([+r.dataset.m]);});
 
@@ -1280,6 +1461,7 @@ function init(){
   art.addEventListener('click',e=>{
     const a=e.target.closest('[data-addsg]'); if(a){ e.stopPropagation(); appendChords(S.sug[a.dataset.addsg]); return; }
     const p=e.target.closest('[data-play]'); if(p){ e.stopPropagation(); playSeq(S.sug[p.dataset.play]); return; }
+    const x=e.target.closest('[data-ctx]'); if(x){ e.stopPropagation(); playWithProgression(S.sug[x.dataset.ctx],x.dataset.ctx); return; }
     const c=e.target.closest('[data-sg]'); if(c) preview(c.dataset.sg);
   });
   art.addEventListener('keydown',e=>{ if(e.key!=='Enter'&&e.key!==' ') return; const c=e.target.closest('[data-sg]'); if(c&&e.target===c){e.preventDefault();preview(c.dataset.sg);} });
@@ -1334,7 +1516,7 @@ function init(){
   analyse();
   setTab(location.hash.slice(1)||'tabs');
 }
-function playSeq(chs){ chs.forEach((c,i)=>setTimeout(()=>play(c.midis),i*900)); }
+function playSeq(chs){ chs.forEach((c,i)=>seqTimers.push(setTimeout(()=>play(c.midis),i*900))); }
 init();
 </script>
 </body>
